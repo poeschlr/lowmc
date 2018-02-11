@@ -1,6 +1,4 @@
-blocksize = 256
-keysize = 80
-rounds = 12
+import argparse
 
 def main():
     ''' Use the global parameters `blocksize`, `keysize` and `rounds`
@@ -23,7 +21,7 @@ def main():
         mat = instantiate_matrix(blocksize, keysize, gen)
         roundkey_matrices.append(mat)
 
-    with open('matrices_and_constants.dat', 'w') as matfile:
+    with open(output_file, 'w') as matfile:
         s = 'LowMC matrices and constants\n'\
             '============================\n'\
             'Block size: ' + str(blocksize) + '\n'\
@@ -74,7 +72,7 @@ def rank(matrix):
     ''' Determine the rank of a binary matrix. '''
     # Copy matrix
     mat = [[x for x in row] for row in matrix]
-    
+
     n = len(matrix)
     m = len(matrix[0])
     for c in range(m):
@@ -120,6 +118,17 @@ def grain_ssg():
         index += 1
         index %= 80
 
-
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Generate the constands for a LowMC instance.')
+    parser.add_argument('-b', '--blocksize', type=int, nargs='?', default=256)
+    parser.add_argument('-k', '--keysize', type=int, nargs='?', default=80)
+    parser.add_argument('-r', '--rounds', type=int, nargs='?', default=12)
+    parser.add_argument('-o','--output', type=str, nargs='?', default='matrices_and_constants.dat')
+    args = parser.parse_args()
+
+    blocksize = args.blocksize
+    keysize = args.keysize
+    rounds = args.rounds
+    output_file = args.output
+
     main()
