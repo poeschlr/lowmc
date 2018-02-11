@@ -1,27 +1,9 @@
 import argparse
+import yaml
 
-def main():
-    ''' Use the global parameters `blocksize`, `keysize` and `rounds`
-        to create the set of matrices and constants for the corresponding
-        LowMC instance. Save those in a file named
-        `matrices_and_constants.dat`.
-    '''
-    gen = grain_ssg()
-    linlayers = []
-    for _ in range(rounds):
-        linlayers.append(instantiate_matrix(blocksize, blocksize, gen))
 
-    round_constants = []
-    for _ in range(rounds):
-        constant = [next(gen) for _ in range(blocksize)]
-        round_constants.append(constant)
-
-    roundkey_matrices = []
-    for _ in range(rounds + 1):
-        mat = instantiate_matrix(blocksize, keysize, gen)
-        roundkey_matrices.append(mat)
-
-    with open(output_file, 'w') as matfile:
+def save_datafile(file, linlayers, round_constants, roundkey_matrices):
+    with open(file, 'w') as matfile:
         s = 'LowMC matrices and constants\n'\
             '============================\n'\
             'Block size: ' + str(blocksize) + '\n'\
@@ -53,6 +35,46 @@ def main():
             for row in roundkey_matrices[r]:
                 s += str(row) + '\n'
             matfile.write(s)
+
+def save_as_yaml(file, linlayers, round_constants, roundkey_matrices):
+    data = {
+        'settings':{
+            'blocksize': blocksize,
+            'keysize': keysize,
+            'rounds': rounds
+        },
+        'linear_layers': linlayers,
+        'round_constants': round_constants,
+        'roundkey_matrices': roundkey_matrices
+    }
+    with open(file, 'w') as outfile:
+        yaml.dump(data, outfile)
+
+def main():
+    ''' Use the global parameters `blocksize`, `keysize` and `rounds`
+        to create the set of matrices and constants for the corresponding
+        LowMC instance. Save those in a file named
+        `matrices_and_constants.dat`.
+    '''
+    gen = grain_ssg()
+    linlayers = []
+    for _ in range(rounds):
+        linlayers.append(instantiate_matrix(blocksize, blocksize, gen))
+
+    round_constants = []
+    for _ in range(rounds):
+        constant = [next(gen) for _ in range(blocksize)]
+        round_constants.append(constant)
+
+    roundkey_matrices = []
+    for _ in range(rounds + 1):
+        mat = instantiate_matrix(blocksize, keysize, gen)
+        roundkey_matrices.append(mat)
+
+    if output_file.lower().endswith('.yaml'):
+        save_as_yaml(output_file, linlayers, round_constants, roundkey_matrices)
+    else:
+        save_datafile(output_file, linlayers, round_constants, roundkey_matrices)
 
 def instantiate_matrix(n, m, gen):
     ''' Instantiate a matrix of maximal rank using bits from the
