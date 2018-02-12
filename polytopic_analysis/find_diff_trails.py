@@ -6,27 +6,43 @@
 # example:
 # export SAGE_LOCAL='/usr/lib64/sagemath/local'
 
+from __future__ import print_function
+
+from ddt import *
 from sage.all import *
 import argparse
 import yaml
 
-sbox_size = 3
+SBOX_SIZE = 3
+
+class LowMC():
+    def __init__(self, lowmc_instance_description):
+        self.blocksize = lowmc_instance_description['settings']['blocksize']
+        self.num_sboxes = lowmc_instance_description['settings']['num_sboxes']
+        self.rounds = lowmc_instance_description['settings']['rounds']
+        self.rounds_with_prop1 = ceil(self.blocksize/(self.num_sboxes*SBOX_SIZE))-1
+        print("Create matrixes from yaml data ", end="")
+        self.affine_matrixes = [matrix(GF(2), M) for M in lowmc_instance_description['linear_layers']]
+        self.inv_affine_matrixes = [M**-1 for M in self.affine_matrixes]
+        self.key_matrixes = [matrix(GF(2), M) for M in lowmc_instance_description['roundkey_matrices']]
+        self.round_constants = [vector(GF(2), v) for v in lowmc_instance_description['round_constants']]
+        print("[   Done   ]")
 
 def getInputForGoodTrail(lowmc_inst):
-    affine_matrixes = [matrix(GF(2), M) for M in lowmc_inst['linear_layers']]
-    blocksize = lowmc_inst['settings']['blocksize']
-    num_sboxes = lowmc_inst['settings']['num_sboxes']
-    rounds_with_prop1 = ceil(blocksize/(num_sboxes*sbox_size))-1
+    affine_matrixes = lowmc_inst.affine_matrixes
+    blocksize = lowmc_inst.blocksize
+    num_sboxes = lowmc_inst.num_sboxes
+    rounds_with_prop1 = lowmc_inst.rounds_with_prop1
     current_affine_trail = affine_matrixes[0]
 
     round = 0
 
-    sb_activation = current_affine_trail[-sbox_size*num_sboxes:]
+    sb_activation = current_affine_trail[-SBOX_SIZE*num_sboxes:]
 
     while rank(sb_activation) < blocksize-1:
         round += 1
         current_affine_trail = affine_matrixes[round]*current_affine_trail
-        new_equations = current_affine_trail[-sbox_size*num_sboxes:].rows()
+        new_equations = current_affine_trail[-SBOX_SIZE*num_sboxes:].rows()
 
         if round < rounds_with_prop1:
             sb_activation = matrix(GF(2), sb_activation.rows() + new_equations)
@@ -34,7 +50,7 @@ def getInputForGoodTrail(lowmc_inst):
             if round == rounds_with_prop1:
                 posibility_space = sb_activation.right_kernel()
 
-            idx = sbox_size*num_sboxes
+            idx = SBOX_SIZE*num_sboxes
             while idx > 0 and rank(sb_activation) < blocksize:
                 sb_activation = matrix(GF(2), sb_activation.rows()+[new_equations[-idx]])
                 idx -= 1
@@ -50,7 +66,7 @@ def getInputForGoodTrail(lowmc_inst):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate the constands for a LowMC instance.')
-    parser.add_argument('-d','--definition', type=str, nargs=1, default='matrices_and_constants.yaml')
+    parser.add_argument('-d','--definition', type=str, nargs=1)
     parser.add_argument('-s', '--num_sboxes', type=int, nargs='?', default=1)
     args = parser.parse_args()
 
@@ -64,4 +80,5 @@ if __name__ == '__main__':
 
     lowmc_instance['settings']['num_sboxes'] = args.num_sboxes
 
-    getInputForGoodTrail(lowmc_instance)
+    lowmc = LowMC(lowmc_instance)
+    getInputForGoodTrail(lowmc)
