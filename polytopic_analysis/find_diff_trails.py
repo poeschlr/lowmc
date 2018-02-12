@@ -7,6 +7,7 @@
 # export SAGE_LOCAL='/usr/lib64/sagemath/local'
 
 from __future__ import print_function
+#import Exception
 
 from ddt import *
 from sage.all import *
@@ -14,6 +15,14 @@ import argparse
 import yaml
 
 SBOX_SIZE = 3
+
+class NotEnoughDegreesOfFreedom(Exception):
+    def __init__(required_degrees, degrees):
+        self.required_degrees = required_degrees
+        self.degrees = degrees
+
+    def __str__():
+        return "Posibility space not enough degrees of freedom. Would need {:d} has {:d}".format(self.required_degrees, self.degrees)
 
 class LowMC():
     def __init__(self, lowmc_instance_description):
@@ -38,6 +47,7 @@ def getInputForGoodTrail(lowmc_inst):
     round = 0
 
     sb_activation = current_affine_trail[-SBOX_SIZE*num_sboxes:]
+    posibility_space = []
 
     while rank(sb_activation) < blocksize-1:
         round += 1
@@ -48,28 +58,58 @@ def getInputForGoodTrail(lowmc_inst):
             sb_activation = matrix(GF(2), sb_activation.rows() + new_equations)
         else:
             if round == rounds_with_prop1:
-                posibility_space = sb_activation.right_kernel()
+                posibility_space.append(sb_activation.right_kernel())
+                old_rank = rank(sb_activation)
 
             idx = SBOX_SIZE*num_sboxes
-            while idx > 0 and rank(sb_activation) < blocksize:
+            while idx > 0 and rank(sb_activation) < blocksize-1:
                 sb_activation = matrix(GF(2), sb_activation.rows()+[new_equations[-idx]])
                 idx -= 1
+                if rank(sb_activation) > old_rank:
+                    old_rank = rank(sb_activation)
+                    posibility_space.append(sb_activation.right_kernel())
 
-    print(posibility_space)
-    print('\n-----------------\n')
+    return posibility_space
 
-    print(sb_activation)
+def int_to_gf2_vector(input, size):
+    return vector(GF(2), [x for x in list('{0:0{width}b}'.format(input, width=size))])
 
 
-    print('\n-----------------\nInput diff with longest trail:')
-    print(sb_activation.right_kernel())
+def sort_pos_by_trail_len(posibility_space):
+    sorted_space = [posibility_space[-1].basis()[0]]
+    for i in range(1,len(posibility_space)):
+        current_basis = posibility_space[-1-i].basis()
+        for j in range(len(current_basis)):
+            if current_basis[j] not in sorted_space:
+                sorted_space.append(current_basis[j])
+
+    return matrix(GF(2), list(reversed(sorted_space)))
+
+def get_optimal_ddiff_of_len(posibility_space, size):
+    max_len = 2**posibility_space[0].dimension() - 1
+    if size > max_len:
+        raise NotEnoughDegreesOfFreedom(max_len, size)
+    sorted_space = sort_pos_by_trail_len(posibility_space)
+    print(sorted_space)
+    d_diff = []
+    i=1
+    while len(d_diff) < size:
+        v = int_to_gf2_vector(i, sorted_space.nrows())
+        r = v*sorted_space
+        if r not in d_diff:
+            d_diff.append(r)
+        i += 1
+        if i > 2**sorted_space.nrows()-1:
+            raise NotEnoughDegreesOfFreedom(2**sorted_space.nrows()-1, i)
+
+    return d_diff
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate the constands for a LowMC instance.')
     parser.add_argument('-d','--definition', type=str, nargs=1)
     parser.add_argument('-s', '--num_sboxes', type=int, nargs='?', default=1)
     args = parser.parse_args()
-
 
     with open(args.definition[0], 'r') as config_stream:
         try:
@@ -81,4 +121,10 @@ if __name__ == '__main__':
     lowmc_instance['settings']['num_sboxes'] = args.num_sboxes
 
     lowmc = LowMC(lowmc_instance)
-    getInputForGoodTrail(lowmc)
+
+    posibility_space=getInputForGoodTrail(lowmc)
+    print(posibility_space)
+    print('--------------------------')
+
+    #print(sort_pos_by_trail_len(posibility_space))
+    print('\n'.join(['{}'.format(v) for v in get_optimal_ddiff_of_len(posibility_space, 3)]))
