@@ -18,12 +18,12 @@ import yaml
 SBOX_SIZE = 3
 
 class NotEnoughDegreesOfFreedom(Exception):
-    def __init__(required_degrees, degrees):
+    def __init__(self, required_degrees, degrees):
         self.required_degrees = required_degrees
         self.degrees = degrees
 
-    def __str__():
-        return "Posibility space not enough degrees of freedom. Would need {:d} has {:d}".format(self.required_degrees, self.degrees)
+    def __str__(self):
+        return "Posibility space not enough degrees of freedom. Would need at least {:d} has {:d}".format(self.required_degrees, self.degrees)
 
 def int_to_gf2_vector(input, size):
     return vector(GF(2), [x for x in list('{0:0{width}b}'.format(input, width=size))])
@@ -57,39 +57,54 @@ class LowMC():
 
     def getInputForGoodTrail(self):
         current_affine_trail = self.affine_matrixes[0]
+        num_sbox_bits = SBOX_SIZE*self.num_sboxes
         round = 0
 
-        sb_activation = current_affine_trail[-SBOX_SIZE*self.num_sboxes:]
+        sb_activation = current_affine_trail.matrix_from_rows_and_columns(
+            range(self.blocksize-num_sbox_bits,self.blocksize),
+            range(self.blocksize-num_sbox_bits)
+            )
         self.posibility_space = []
 
-        while rank(sb_activation) < self.blocksize-1:
+        desired_rank = self.blocksize-num_sbox_bits-1
+        while rank(sb_activation) < desired_rank:
             round += 1
             current_affine_trail = self.affine_matrixes[round]*current_affine_trail
-            new_equations = current_affine_trail[-SBOX_SIZE*self.num_sboxes:].rows()
+            new_equations = []
+            for eq in current_affine_trail[-num_sbox_bits:].rows():
+                new_equations.append(eq[:-num_sbox_bits])
 
-            if round < self.rounds_with_prop1:
+            if round < self.rounds_with_prop1-1:
                 sb_activation = matrix(GF(2), sb_activation.rows() + new_equations)
             else:
-                if round == self.rounds_with_prop1:
+                if round == self.rounds_with_prop1-1:
                     self.posibility_space.append(sb_activation.right_kernel())
                     old_rank = rank(sb_activation)
                     #print("Num guaranteed rounds={:d}, rank={:d}".format(round, old_rank))
 
-                idx = SBOX_SIZE*self.num_sboxes
-                while idx > 0 and rank(sb_activation) < self.blocksize-1:
+                idx = num_sbox_bits
+                while idx > 0 and rank(sb_activation) < desired_rank:
                     sb_activation = matrix(GF(2), sb_activation.rows()+[new_equations[-idx]])
                     idx -= 1
                     if rank(sb_activation) > old_rank:
                         old_rank = rank(sb_activation)
                         self.posibility_space.append(sb_activation.right_kernel())
 
+        zero_bits = [0]*num_sbox_bits
+
+        for i in range(len(self.posibility_space)):
+            current_basis = self.posibility_space[i].basis()
+            resulting_basis = []
+            for j in range(len(current_basis)):
+                resulting_basis.append(current_basis[j].list() + zero_bits)
+            self.posibility_space[i] = resulting_basis
         return self.posibility_space
 
 
     def sort_pos_by_trail_len(self):
-        sorted_space = [self.posibility_space[-1].basis()[0]]
+        sorted_space = [self.posibility_space[-1][0]]
         for i in range(1,len(self.posibility_space)):
-            current_basis = self.posibility_space[-1-i].basis()
+            current_basis = self.posibility_space[-1-i]
             for j in range(len(current_basis)):
                 if current_basis[j] not in sorted_space:
                     sorted_space.append(current_basis[j])
@@ -97,21 +112,24 @@ class LowMC():
         self.sorted_space = matrix(GF(2), list(reversed(sorted_space)))
 
     def get_optimal_ddiff_of_len(self, size):
-        max_len = 2**self.posibility_space[0].dimension() - 1
+        max_len = 2**len(self.posibility_space[0]) - 1
         if size > max_len:
             raise NotEnoughDegreesOfFreedom(max_len, size)
         self.sort_pos_by_trail_len()
-        #print(sorted_space)
+        print("sorted")
+        print(self.sorted_space)
+        print("")
         d_diff = []
-        i=1
+        i=0
         while len(d_diff) < size:
+            i += 1
+            if i > 2**self.sorted_space.nrows()-1:
+                raise NotEnoughDegreesOfFreedom(i, 2**self.sorted_space.nrows()-1)
+            
             v = int_to_gf2_vector(i, self.sorted_space.nrows())
             r = v*self.sorted_space
             if r not in d_diff:
                 d_diff.append(r)
-            i += 1
-            if i > 2**self.sorted_space.nrows()-1:
-                raise NotEnoughDegreesOfFreedom(2**self.sorted_space.nrows()-1, i)
 
         return d_diff
 
@@ -149,7 +167,7 @@ class LowMC():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate the constands for a LowMC instance.')
-    parser.add_argument('-d','--definition', type=str, nargs=1)
+    parser.add_argument('-d', '--definition', type=str, nargs=1)
     parser.add_argument('-s', '--num_sboxes', type=int, nargs='?', default=1)
     args = parser.parse_args()
 
@@ -169,10 +187,14 @@ if __name__ == '__main__':
     print('--------------------------')
 
     #print(sort_pos_by_trail_len(posibility_space))
-    ddiff = lowmc.get_optimal_ddiff_of_len(3)
+    try:
+        ddiff = lowmc.get_optimal_ddiff_of_len(3)
+    except Exception as e:
+        print(e)
+        exit()
     print('\n'.join(['{}'.format(v) for v in ddiff]))
 
-    v=vector(ddiff[0])
+    #v=vector(ddiff[0])
     #print(t[v[-3:].row()[0]])
-    print('--------------------------')
-    print_list_of_vectors(lowmc.propagate_diff_forward(v,4))
+    #print('--------------------------')
+    #print_list_of_vectors(lowmc.propagate_diff_forward(v,4))
