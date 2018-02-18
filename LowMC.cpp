@@ -6,6 +6,10 @@
 
 #include "LowMC.h"
 
+#ifdef USE_EXTERNAL_DEFINITION
+#include "LowMC_def.h"
+#endif
+
 
 /////////////////////////////
 //     LowMC functions     //
@@ -81,7 +85,7 @@ void LowMC::print_matrices() {
         std::cout << "]" << std::endl;
         std::cout << std::endl;
     }
-    
+
     std::cout << "Round key matrices" << std::endl;
     std::cout << "---------------------" << std::endl;
     for (unsigned r = 0; r <= rounds; ++r) {
@@ -163,7 +167,51 @@ void LowMC::keyschedule () {
     return;
 }
 
+#ifdef USE_EXTERNAL_DEFINITION
+void LowMC::instantiate_LowMC () {
+    // Create LinMatrices and invLinMatrices
+    LinMatrices.clear();
+    invLinMatrices.clear();
+    for (unsigned r = 0; r < rounds; ++r) {
+        // Create matrix
+        std::vector<block> mat;
+        // Fill matrix with random bits
 
+        mat.clear();
+        for (unsigned i = 0; i < blocksize; ++i) {
+            mat.push_back( block(lgen_inst_lin_layer[r][i]) );
+        }
+        // Repeat if matrix is not invertible
+        assert( rank_of_Matrix(mat) == blocksize );
+        LinMatrices.push_back(mat);
+        invLinMatrices.push_back(invert_Matrix (LinMatrices.back()));
+    }
+
+    // Create roundconstants
+    roundconstants.clear();
+    for (unsigned r = 0; r < rounds; ++r) {
+        roundconstants.push_back( block(lgen_inst_round_constant[r]) );
+    }
+
+    // Create KeyMatrices
+    KeyMatrices.clear();
+    for (unsigned r = 0; r <= rounds; ++r) {
+        // Create matrix
+        std::vector<keyblock> mat;
+        // Fill matrix with random bits
+
+        mat.clear();
+        for (unsigned i = 0; i < blocksize; ++i) {
+            mat.push_back( block(lgen_inst_key_matrix[r][i]) );
+
+        // Repeat if matrix is not of maximal rank
+        assert( rank_of_Matrix_Key(mat) == std::min(blocksize, keysize) );
+        KeyMatrices.push_back(mat);
+    }
+
+    return;
+}
+#else
 void LowMC::instantiate_LowMC () {
     // Create LinMatrices and invLinMatrices
     LinMatrices.clear();
@@ -204,10 +252,10 @@ void LowMC::instantiate_LowMC () {
         } while ( rank_of_Matrix_Key(mat) < std::min(blocksize, keysize) );
         KeyMatrices.push_back(mat);
     }
-    
+
     return;
 }
-
+#endif
 
 /////////////////////////////
 // Binary matrix functions //
@@ -215,7 +263,7 @@ void LowMC::instantiate_LowMC () {
 
 
 unsigned LowMC::rank_of_Matrix (const std::vector<block> matrix) {
-    std::vector<block> mat; //Copy of the matrix 
+    std::vector<block> mat; //Copy of the matrix
     for (auto u : matrix) {
         mat.push_back(u);
     }
@@ -247,7 +295,7 @@ unsigned LowMC::rank_of_Matrix (const std::vector<block> matrix) {
 
 
 unsigned LowMC::rank_of_Matrix_Key (const std::vector<keyblock> matrix) {
-    std::vector<keyblock> mat; //Copy of the matrix 
+    std::vector<keyblock> mat; //Copy of the matrix
     for (auto u : matrix) {
         mat.push_back(u);
     }
@@ -279,7 +327,7 @@ unsigned LowMC::rank_of_Matrix_Key (const std::vector<keyblock> matrix) {
 
 
 std::vector<block> LowMC::invert_Matrix (const std::vector<block> matrix) {
-    std::vector<block> mat; //Copy of the matrix 
+    std::vector<block> mat; //Copy of the matrix
     for (auto u : matrix) {
         mat.push_back(u);
     }
@@ -383,6 +431,3 @@ bool LowMC::getrandbit () {
     } while (! choice);
     return tmp;
 }
-
-
-
