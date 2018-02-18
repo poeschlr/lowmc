@@ -116,16 +116,16 @@ class LowMC():
         if size > max_len:
             raise NotEnoughDegreesOfFreedom(max_len, size)
         self.sort_pos_by_trail_len()
-        print("sorted")
-        print(self.sorted_space)
-        print("")
+        #print("sorted")
+        #print(self.sorted_space)
+        #print("")
         d_diff = []
         i=0
         while len(d_diff) < size:
             i += 1
             if i > 2**self.sorted_space.nrows()-1:
                 raise NotEnoughDegreesOfFreedom(i, 2**self.sorted_space.nrows()-1)
-            
+
             v = int_to_gf2_vector(i, self.sorted_space.nrows())
             r = v*self.sorted_space
             if r not in d_diff:
@@ -141,29 +141,53 @@ class LowMC():
         return result
 
 
-    def permutation(self, in_diff, array, sbox_idx):
+    def _permutation_diff(self, in_diff, array, sbox_idx):
         if sbox_idx == len(array)-1:
             return [self.set_bits_at_sbox_out(sbox_idx, in_diff, o) for o in array[sbox_idx]]
 
         result = []
 
-        lower_res = self.permutation(in_diff, array, sbox_idx + 1)
+        lower_res = self._permutation_diff(in_diff, array, sbox_idx + 1)
         for o in array[sbox_idx]:
             for lr in lower_res:
                 result.append(self.set_bits_at_sbox_out(sbox_idx, lr, o))
         return result
 
     def propagate_diff_forward(self, in_diff, round):
-        print('propagate')
-        print(in_diff)
         od = []
         for sbox_idx in range(self.num_sboxes):
             id = in_diff[-SBOX_SIZE*(sbox_idx+1): None if sbox_idx == 0 else -SBOX_SIZE*sbox_idx].row()[0]
             x = self.diff_propagation_forward[id]
             od.append(x)
-            print("{}->{}".format(id,x))
 
-        return [self.affine_matrixes[round]*v for v in self.permutation(in_diff, od, 0)]
+        return [self.affine_matrixes[round]*v for v in self._permutation_diff(in_diff, od, 0)]
+
+    def _permutation_ddiff(self, diffs, ddiff_idx):
+        if ddiff_idx == 0:
+            return [[d] for d in diffs[0]]
+
+        result = []
+
+        lower_res = self._permutation_ddiff(diffs, ddiff_idx-1)
+
+        for lr in lower_res:
+            for d in diffs[ddiff_idx]:
+                result.append(lr + [d])
+        return result
+
+    def propagate_ddiff_forward(self, in_ddiff, round):
+        #print_list_of_vectors(in_ddiff)
+        #print("------------------------------")
+        out_diffs = []
+        for in_diff in in_ddiff:
+            #print(self.propagate_diff_forward(in_diff, round))
+            out_diffs.append(self.propagate_diff_forward(in_diff, round))
+
+        return self._permutation_ddiff(out_diffs,len(out_diffs)-1)
+        #print_list_of_vectors(out_diffs)
+
+
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate the constands for a LowMC instance.')
@@ -183,18 +207,25 @@ if __name__ == '__main__':
     lowmc = LowMC(lowmc_instance)
 
     posibility_space=lowmc.getInputForGoodTrail()
-    print(posibility_space)
-    print('--------------------------')
+    #print(posibility_space)
+    #print('--------------------------')
 
     #print(sort_pos_by_trail_len(posibility_space))
     try:
-        ddiff = lowmc.get_optimal_ddiff_of_len(3)
+        ddiff = lowmc.get_optimal_ddiff_of_len(2)
     except Exception as e:
         print(e)
         exit()
-    print('\n'.join(['{}'.format(v) for v in ddiff]))
+    #print('\n'.join(['{}'.format(v) for v in ddiff]))
 
-    #v=vector(ddiff[0])
-    #print(t[v[-3:].row()[0]])
+    v=vector(ddiff[0])
     #print('--------------------------')
-    #print_list_of_vectors(lowmc.propagate_diff_forward(v,4))
+    x = lowmc.affine_matrixes[3]*v
+    #print(x)
+    #print('--------------------------')
+    #print_list_of_vectors(lowmc.propagate_diff_forward(x,4))
+
+    print('\n\n--------------------------')
+    for i in range(len(ddiff)):
+        ddiff[i][-1]=1
+    print_list_of_vectors(lowmc.propagate_ddiff_forward(ddiff,0))
