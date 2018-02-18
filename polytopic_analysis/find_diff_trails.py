@@ -186,7 +186,19 @@ class LowMC():
         return self._permutation_ddiff(out_diffs,len(out_diffs)-1)
         #print_list_of_vectors(out_diffs)
 
+    def propagate_ddiff_forward_till_round(self, in_ddiff, round):
+        ddiffs_current_round = self.propagate_ddiff_forward(in_ddiff, 0)
 
+        for r in range(1, round):
+            ddiffs_after_round = []
+            for ddiff in ddiffs_current_round:
+                ddiffs_after_round += self.propagate_ddiff_forward(ddiff, r)
+                #ToDo remove dublicates.
+
+            ddiffs_current_round = ddiffs_after_round
+            print("Num ddiffs after round {} is {}".format(r, len(ddiffs_current_round)))
+
+        return ddiffs_after_round
 
 
 if __name__ == '__main__':
@@ -226,6 +238,5 @@ if __name__ == '__main__':
     #print_list_of_vectors(lowmc.propagate_diff_forward(x,4))
 
     print('\n\n--------------------------')
-    for i in range(len(ddiff)):
-        ddiff[i][-1]=1
-    print_list_of_vectors(lowmc.propagate_ddiff_forward(ddiff,0))
+
+    print_list_of_vectors(lowmc.propagate_ddiff_forward_till_round(ddiff,7))
