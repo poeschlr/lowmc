@@ -3,12 +3,9 @@
 #include <fstream>
 #include <cstdlib>
 #include <algorithm>
+#include <cassert>
 
 #include "LowMC.h"
-
-#ifdef USE_EXTERNAL_DEFINITION
-#include "LowMC_def.h"
-#endif
 
 
 /////////////////////////////
@@ -182,7 +179,8 @@ void LowMC::instantiate_LowMC () {
             mat.push_back( block(lgen_inst_lin_layer[r][i]) );
         }
         // Repeat if matrix is not invertible
-        assert( rank_of_Matrix(mat) == blocksize );
+        int rank = rank_of_Matrix(mat);
+        assert( rank == blocksize );
         LinMatrices.push_back(mat);
         invLinMatrices.push_back(invert_Matrix (LinMatrices.back()));
     }
@@ -202,8 +200,8 @@ void LowMC::instantiate_LowMC () {
 
         mat.clear();
         for (unsigned i = 0; i < blocksize; ++i) {
-            mat.push_back( block(lgen_inst_key_matrix[r][i]) );
-
+            mat.push_back( keyblock(lgen_inst_key_matrix[r][i]) );
+        }
         // Repeat if matrix is not of maximal rank
         assert( rank_of_Matrix_Key(mat) == std::min(blocksize, keysize) );
         KeyMatrices.push_back(mat);

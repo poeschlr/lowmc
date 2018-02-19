@@ -51,22 +51,23 @@ def save_as_yaml(file, linlayers, round_constants, roundkey_matrices):
         yaml.dump(data, outfile)
 
 def save_as_cpp(file, linlayers, round_constants, roundkey_matrices):
-    with open(file, 'w') as matfile:
-        s = '#include <string>\n'\
-            '#include <bitset>\n'\
-            '#include <vector>\n\n'\
+    cpp_file = file.replace('.h', '.cpp')
+    with open(cpp_file, 'w') as matfile:
+        s = '#include "' + file + '"\n'\
             '/*\n'\
             ' * LowMC matrices and constants\n'\
-            ' ******************************/\n\n'\
-            'gen_inst_blocksize = ' + str(blocksize) + '\n'\
-            'gen_inst_keysize = ' + str(keysize) + '\n'\
-            'gen_inst_rounds = ' + str(rounds) + '\n\n'
+            ' ******************************/\n\n'#\
+            # 'const unsigned numofboxes = ' + str(num_sboxes) + ';    // Number of Sboxes\n'\
+            # 'const unsigned blocksize = ' + str(blocksize) + ';   // Block size in bits\n'\
+            # 'const unsigned keysize = ' + str(keysize) + '; // Key size in bits\n'\
+            # 'const unsigned rounds = ' + str(rounds) + '; // Number of rounds\n\n'\
+            # 'const unsigned identitysize = blocksize - 3*numofboxes;\n\n'
         matfile.write(s)
         s = '/*\n'\
             ' * Linear layer matrices\n'\
             ' ********************/\n'
         matfile.write(s)
-        s = 'string lgen_inst_lin_layer[{num_rounds:d}][{blocksize:d}] = {{\n'.format(
+        s = 'std::string lgen_inst_lin_layer[{num_rounds:d}][{blocksize:d}] = {{\n'.format(
                 num_rounds=rounds, blocksize=blocksize
             )
         for r in range(rounds):
@@ -75,35 +76,78 @@ def save_as_cpp(file, linlayers, round_constants, roundkey_matrices):
                 s += '    "{:s}",\n'.format(''.join(map(str, row)))
             s = s[:-2] + '\n'
             s += '  }}{:s}\n'.format(',' if r<rounds-1 else '')
-        s += '}\n\n'
+        s += '};\n\n'
         matfile.write(s)
 
         s = '/*Round constants\n'\
             ' ********************/\n\n'
         matfile.write(s)
-        s = 'string lgen_inst_round_constant[{num_rounds:d}] = {{\n'.format(num_rounds=rounds)
+        s = 'std::string lgen_inst_round_constant[{num_rounds:d}] = {{\n'.format(num_rounds=rounds)
         for r in range(rounds):
             s += '  "{:s}"{:s} // Round {:d}\n'.format(
                 ''.join(map(str,round_constants[r])),
                 ',' if r<rounds-1 else ' ', r
             )
-        s += '}\n\n'
+        s += '};\n\n'
         matfile.write(s)
 
         s = '/*Round key matrices\n'\
             ' ********************/\n\n'
         matfile.write(s)
 
-        s = 'string lgen_inst_key_matrix[{num_rounds:d}][{blocksize:d}] = {{\n'.format(
-                num_rounds=rounds, blocksize=blocksize
+        s = 'std::string lgen_inst_key_matrix[{num_rounds:d}][{blocksize:d}] = {{\n'.format(
+                num_rounds=rounds+1, blocksize=blocksize
             )
         for r in range(rounds + 1):
             s += '  {{ // Round key matrix - Round {:d}\n'.format(r)
             for row in roundkey_matrices[r]:
                 s += '    "{:s}",\n'.format(''.join(map(str, row)))
             s = s[:-2] + '\n'
-            s += '  }}{:s}\n'.format(',' if r<rounds-1 else '')
-        s += '}'
+            s += '  }}{:s}\n'.format(',' if r<rounds else '')
+        s += '};\n\n'
+        matfile.write(s)
+
+    with open(file, 'w') as matfile:
+        s = '#ifndef _LOWMC_EXTERNAL_DEFINITION_H_\n'\
+            '#define _LOWMC_EXTERNAL_DEFINITION_H_\n\n'\
+            '#include <string>\n'\
+            '#include <vector>\n\n'\
+            '/*\n'\
+            ' * LowMC matrices and constants\n'\
+            ' ******************************/\n\n'\
+            'const unsigned numofboxes = ' + str(num_sboxes) + ';    // Number of Sboxes\n'\
+            'const unsigned blocksize = ' + str(blocksize) + ';   // Block size in bits\n'\
+            'const unsigned keysize = ' + str(keysize) + '; // Key size in bits\n'\
+            'const unsigned rounds = ' + str(rounds) + '; // Number of rounds\n\n'\
+            'const unsigned identitysize = blocksize - 3*numofboxes;\n\n'
+        matfile.write(s)
+        s = '/*\n'\
+            ' * Linear layer matrices\n'\
+            ' ********************/\n'
+        matfile.write(s)
+        s = 'extern std::string lgen_inst_lin_layer[{num_rounds:d}][{blocksize:d}];'.format(
+                num_rounds=rounds, blocksize=blocksize
+            )
+        matfile.write(s)
+
+        s = '/*Round constants\n'\
+            ' ********************/\n\n'
+        matfile.write(s)
+        s = 'extern std::string lgen_inst_round_constant[{num_rounds:d}];'.format(
+                num_rounds=rounds, blocksize=blocksize
+            )
+        matfile.write(s)
+
+        s = '/*Round key matrices\n'\
+            ' ********************/\n\n'
+        matfile.write(s)
+
+        s = 'extern std::string lgen_inst_key_matrix[{num_rounds:d}][{blocksize:d}];'.format(
+                num_rounds=rounds+1, blocksize=blocksize
+            )
+        matfile.write(s)
+
+        s = '\n\n#endif //_LOWMC_EXTERNAL_DEFINITION_H_'
         matfile.write(s)
 
 def main():
@@ -205,6 +249,7 @@ if __name__ == '__main__':
     parser.add_argument('-b', '--blocksize', type=int, nargs='?', default=256)
     parser.add_argument('-k', '--keysize', type=int, nargs='?', default=80)
     parser.add_argument('-r', '--rounds', type=int, nargs='?', default=12)
+    parser.add_argument('-s', '--num_sboxes', type=int, nargs='?', default=1)
     parser.add_argument('-o','--output', type=str, nargs='+', default='matrices_and_constants.dat')
     args = parser.parse_args()
 
@@ -212,5 +257,6 @@ if __name__ == '__main__':
     keysize = args.keysize
     rounds = args.rounds
     output_file = args.output
+    num_sboxes = args.num_sboxes
 
     main()
