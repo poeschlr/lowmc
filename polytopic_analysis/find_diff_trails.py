@@ -237,6 +237,8 @@ if __name__ == '__main__':
     #print('--------------------------')
     #print_list_of_vectors(lowmc.propagate_diff_forward(x,4))
 
+
+    print_list_of_vectors(ddiff)
     print('\n\n--------------------------')
 
     print_list_of_vectors(lowmc.propagate_ddiff_forward_till_round(ddiff,7))

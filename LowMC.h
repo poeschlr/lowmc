@@ -29,6 +29,7 @@ public:
     };
 
     block encrypt (const block message);
+    block encrypt (const block message, const unsigned num_rounds);
     block decrypt (const block message);
     void set_key (keyblock k);
 
