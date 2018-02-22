@@ -14,7 +14,7 @@ const unsigned rounds = 12; // Number of rounds
 const unsigned identitysize = blocksize - 3*numofboxes;
                   // Size of the identity part in the Sbox layer
 #else
-#include "LowMC_def.h"
+#include "LowMC_def_8.h"
 #endif
 
 typedef std::bitset<blocksize> block; // Store messages and states
@@ -35,6 +35,12 @@ public:
 
     void print_matrices();
     
+
+    std::vector<std::vector<block>> LinMatrices;
+
+    block MultiplyWithGF2Matrix
+            (const std::vector<block> matrix, const block message);
+
 private:
 // LowMC private data members //
     // The Sbox and its inverse    
@@ -42,7 +48,7 @@ private:
         {0x00, 0x01, 0x03, 0x06, 0x07, 0x04, 0x05, 0x02};
     const std::vector<unsigned> invSbox =
         {0x00, 0x01, 0x07, 0x02, 0x05, 0x06, 0x03, 0x04};
-    std::vector<std::vector<block>> LinMatrices;
+
         // Stores the binary matrices for each round
     std::vector<std::vector<block>> invLinMatrices;
         // Stores the inverses of LinMatrices
@@ -61,8 +67,7 @@ private:
     block invSubstitution (const block message);
         // The inverse substitution layer
 
-    block MultiplyWithGF2Matrix
-        (const std::vector<block> matrix, const block message);    
+
         // For the linear layer
     block MultiplyWithGF2Matrix_Key
         (const std::vector<keyblock> matrix, const keyblock k);

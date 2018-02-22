@@ -189,6 +189,7 @@ class LowMC():
     def propagate_ddiff_forward_till_round(self, in_ddiff, round):
         ddiffs_current_round = self.propagate_ddiff_forward(in_ddiff, 0)
 
+        ddiffs_after_round = ddiffs_current_round # make it work for trails of lenght 1
         for r in range(1, round):
             ddiffs_after_round = []
             for ddiff in ddiffs_current_round:
@@ -224,7 +225,7 @@ if __name__ == '__main__':
 
     #print(sort_pos_by_trail_len(posibility_space))
     try:
-        ddiff = lowmc.get_optimal_ddiff_of_len(2)
+        ddiff = lowmc.get_optimal_ddiff_of_len(1)
     except Exception as e:
         print(e)
         exit()
@@ -241,4 +242,10 @@ if __name__ == '__main__':
     print_list_of_vectors(ddiff)
     print('\n\n--------------------------')
 
-    print_list_of_vectors(lowmc.propagate_ddiff_forward_till_round(ddiff,7))
+    print_list_of_vectors(lowmc.propagate_ddiff_forward_till_round(ddiff,3))
+
+
+    # x = vector(GF(2), [0,0,1,0,0,1,1,0])
+    # print(lowmc.affine_matrixes[0])
+    # print('\n------------------------------\n')
+    # print(lowmc.affine_matrixes[0]*x)

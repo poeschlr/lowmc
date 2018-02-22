@@ -186,7 +186,7 @@ void LowMC::instantiate_LowMC () {
         // Fill matrix with random bits
 
         mat.clear();
-        for (unsigned i = 0; i < blocksize; ++i) {
+        for (int i = blocksize-1; i >= 0; --i) {
             mat.push_back( block(lgen_inst_lin_layer[r][i]) );
         }
         // Repeat if matrix is not invertible
@@ -210,7 +210,7 @@ void LowMC::instantiate_LowMC () {
         // Fill matrix with random bits
 
         mat.clear();
-        for (unsigned i = 0; i < blocksize; ++i) {
+        for (int i = blocksize-1; i >= 0; --i) {
             mat.push_back( keyblock(lgen_inst_key_matrix[r][i]) );
         }
         // Repeat if matrix is not of maximal rank
