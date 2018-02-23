@@ -81,7 +81,10 @@ int main (int argc, char *argv[]){
 //    block msg = block("00100110");
 //    std::cout << cipher.MultiplyWithGF2Matrix(cipher.LinMatrices[0], msg) << std::endl;
 
-    //cipher.print_matrices();
+//    cipher.print_matrices();
+    block m = 0;
+    std::cout << "encrypt " << m << std::endl;
+    std::cout << cipher.encrypt(m) << std::endl;
    
     return 0;
 }

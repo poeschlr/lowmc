@@ -27,10 +27,16 @@ block LowMC::encrypt (const block message) {
 block LowMC::encrypt (const block message, const unsigned num_rounds){
 	block c = message ^ roundkeys[0];
 	for (unsigned r = 1; r <= num_rounds; ++r) {
+//		std::cout << "round " << r << std::endl;
+//		std::cout << c << std::endl;
 		c =  Substitution(c);
+//		std::cout << c << std::endl;
 		c =  MultiplyWithGF2Matrix(LinMatrices[r-1], c);
+//		std::cout << c << std::endl;
 		c ^= roundconstants[r-1];
+//		std::cout << c << std::endl;
 		c ^= roundkeys[r];
+//		std::cout << c << std::endl;
 	}
 	return c;
 }
