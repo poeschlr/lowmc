@@ -66,6 +66,28 @@ class LowMC():
         for r in range(self.rounds + 1):
             self.round_keys.append(self.key_matrixes[r]*key)
 
+        zv = VectorSpace(GF(2), self.blocksize).zero()
+        self.reduced_round_keys = [copy(zv) for i in range(self.rounds + 1)]
+        prev_rk_rest = copy(zv)
+
+        sbox_bits = self.num_sboxes*SBOX_SIZE
+        first_sbox_bit_idx = self.blocksize - sbox_bits
+
+        for r in range(self.rounds):
+            cr = self.rounds - r
+            temp_rk = prev_rk_rest + self.round_keys[cr]
+            temp_rk = self.inv_affine_matrixes[cr - 1]*temp_rk
+
+
+            for i in range(self.blocksize):
+                if i < first_sbox_bit_idx:
+                    prev_rk_rest[i] = temp_rk[i]
+                else:
+                    self.reduced_round_keys[cr][i] = temp_rk[i]
+
+
+        self.reduced_round_keys[0] = prev_rk_rest + self.round_keys[0]
+
         debug_output("[   Done   ]", 1)
 
     def substitution(self, input):
@@ -95,6 +117,23 @@ class LowMC():
             ct += self.round_constants[r]
             debug_output(ct, 2)
             ct += self.round_keys[r+1]
+            debug_output(ct, 2)
+
+        return ct
+
+    def encrypt_reduced(self, input, rounds=None):
+        rd = rounds if rounds is not None else self.rounds
+        ct = input + self.reduced_round_keys[0]
+        for r in range(rd):
+            debug_output('round {:d}'.format(r+1), 2)
+            debug_output(ct, 2)
+            ct = self.substitution(ct)
+            debug_output(ct, 2)
+            ct += self.reduced_round_keys[r+1]
+            debug_output(ct, 2)
+            ct = self.affine_matrixes[r]*ct
+            debug_output(ct, 2)
+            ct += self.round_constants[r]
             debug_output(ct, 2)
 
         return ct
@@ -151,20 +190,40 @@ if __name__ == '__main__':
                     print(lowmc.round_keys[int(command[2])])
                 else:
                     print_list(lowmc.round_keys)
+            elif command[1] == 'reduced_roundkey':
+                if len(command) > 2:
+                    print(lowmc.reduced_round_keys[int(command[2])])
+                else:
+                    print_list(lowmc.reduced_round_keys)
             else:
                 print('unknown print command "{}"'.format(command[1]))
 
             continue
 
-        pt = command[0]
-        try:
-            block = to_gf2_vector(pt, lowmc.blocksize)
-        except TypeError as e:
-            print('Illegal input')
-            if verbosity_level > 1:
-                print(e)
-            continue
+        if command[0] == 'sbox':
+            if len(command) < 2:
+                print('sbox command expects an input parameter')
+                continue
+            pt = int(command[1],0)
+            if pt < 0 or pt > len(SBox) - 1:
+                print('too many input bits for sbox command')
+                continue
 
-        rounds = int(command[1]) if len(command) > 1 else None
+            print('0b{:0{width}b}'.format(SBox[pt], width=SBOX_SIZE))
 
-        print(lowmc.encrypt(block, rounds))
+        if command[0].startswith('enc'):
+            if len(command) < 2:
+                print('encryption command expects the plaintext as the first parameter')
+                continue
+            pt = command[1]
+            try:
+                block = to_gf2_vector(pt, lowmc.blocksize)
+            except TypeError as e:
+                print('Illegal input')
+                debug_output(e, 2)
+                continue
+
+            rounds = int(command[2]) if len(command) > 2 else None
+
+            ct = lowmc.encrypt(block, rounds) if 'std' in command[0] else lowmc.encrypt_reduced(block, rounds)
+            print(ct)
