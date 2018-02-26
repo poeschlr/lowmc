@@ -26,6 +26,48 @@ void bitsetAdd(std::bitset<N>& x, const std::bitset<N>& y){
 	}
 }
 
+
+
+int check_diff(int argc, char *argv[], LowMC &cipher){
+	if(argc == 3){
+		std::string str_diff = std::string(argv[1]);
+		if(str_diff.length() != blocksize){
+			std::cout << "Wrong size of input diff" << std::endl;
+			return -1;
+		}
+		block in_diff = block(str_diff);
+		int num_rounds = 0;
+		try{
+			num_rounds = std::stoi(argv[2]);
+		}
+		catch (const std::invalid_argument& ia) {
+			  std::cerr << "Invalid argument for number of rounds: " << ia.what() << std::endl;
+			  return -1;
+		}
+
+		std::vector<block> diffset;
+		for(unsigned i=0; i < std::pow(2,blocksize); i++){
+			block i1 = block(i);
+			block i2 = i1^in_diff;
+			block r1 = cipher.encrypt(i1, num_rounds);
+			block r2 = cipher.encrypt(i2, num_rounds);
+			block odiff = r1 ^ r2;
+
+			if(std::find(diffset.begin(), diffset.end(), odiff) == diffset.end()) {
+				diffset.push_back(odiff);
+			}
+		}
+		std::cout << in_diff << std::endl;
+		std::cout << diffset.size() << std::endl;
+		std::vector<block>::iterator it;
+		for(it = diffset.begin(); it != diffset.end(); it++)    {
+			std::cout<< *it << std::endl;
+		}
+	}
+	return 0;
+}
+
+
 int main (int argc, char *argv[]){
     // Example usage of the LowMC class
     // Instantiate a LowMC cipher instance called cipher using the key '1'.
@@ -41,50 +83,18 @@ int main (int argc, char *argv[]){
 //    std::cout << "Encryption followed by decryption of plaintext:" << std::endl;
 //    std::cout << m << std::endl;
 
-    if(argc == 3){
-    	std::string str_diff = std::string(argv[1]);
-    	if(str_diff.length() != blocksize){
-    		std::cout << "Wrong size of input diff" << std::endl;
+    if(argc == 2){
+    	std::string str_pt = std::string(argv[1]);
+    	if(str_pt.length() != blocksize){
+    		std::cout << "Wrong size of plaintext" << std::endl;
     		return -1;
     	}
-    	block in_diff = block(str_diff);
-    	int num_rounds = 0;
-    	try{
-    		num_rounds = std::stoi(argv[2]);
-    	}
-		catch (const std::invalid_argument& ia) {
-			  std::cerr << "Invalid argument for number of rows: " << ia.what() << std::endl;
-			  return -1;
-		}
+    	block pt = block(str_pt);
 
-		std::vector<block> diffset;
-    	for(unsigned i=0; i < std::pow(2,blocksize); i++){
-    		block i1 = block(i);
-    		block i2 = i1^in_diff;
-    		block r1 = cipher.encrypt(i1, num_rounds);
-    		block r2 = cipher.encrypt(i2, num_rounds);
-    		block odiff = r1 ^ r2;
+		block ct = cipher.encrypt(pt);
+		std::cout << ct << std::endl;
 
-    		if(std::find(diffset.begin(), diffset.end(), odiff) == diffset.end()) {
-    		    diffset.push_back(odiff);
-    		}
-    	}
-    	std::cout << in_diff << std::endl;
-    	std::cout << diffset.size() << std::endl;
-    	std::vector<block>::iterator it;
-    	for(it = diffset.begin(); it != diffset.end(); it++)    {
-			std::cout<< *it << std::endl;
-    	}
     }
-//    cipher.print_matrices();
-
-//    block msg = block("00100110");
-//    std::cout << cipher.MultiplyWithGF2Matrix(cipher.LinMatrices[0], msg) << std::endl;
-
-//    cipher.print_matrices();
-    block m = 0;
-    std::cout << "encrypt " << m << std::endl;
-    std::cout << cipher.encrypt(m) << std::endl;
    
     return 0;
 }

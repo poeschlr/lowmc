@@ -16,6 +16,7 @@ import yaml
 
 SBOX_SIZE = 3
 SBox = [0x00, 0x01, 0x03, 0x06, 0x07, 0x04, 0x05, 0x02]
+invSBox = [0x00, 0x01, 0x07, 0x02, 0x05, 0x06, 0x03, 0x04]
 
 verbosity_level = 0
 
@@ -35,9 +36,10 @@ def to_gf2_vector(input, size):
     else:
         raise TypeError('can only convert int or correctly formated string to gf2 vector, got {} with type {}'.format(input, type(input)))
 
-def print_list(lst):
-    for l in lst:
-        print(l,end='\n\n')
+def print_list(lst, required_verbosity = 0):
+    if verbosity_level > required_verbosity:
+        for l in lst:
+            print(l,end='\n\n')
 
 def debug_output(msg, required_verbosity = 0, end='\n'):
     if verbosity_level >= required_verbosity:
@@ -90,7 +92,7 @@ class LowMC():
 
         debug_output("[   Done   ]", 1)
 
-    def substitution(self, input):
+    def substitution(self, input, inverse=False):
         sbox_bits = self.num_sboxes*SBOX_SIZE
         ct = copy(input)
         for i in range(sbox_bits):
@@ -98,7 +100,10 @@ class LowMC():
         for sbox_idx in range(self.num_sboxes):
             target_end = self.blocksize - SBOX_SIZE*(sbox_idx)
             sb_in = input[target_end - SBOX_SIZE : target_end]
-            sb_out = to_gf2_vector(SBox[int(''.join(map(str, sb_in)), 2)]<<(sbox_idx*SBOX_SIZE), self.blocksize)
+            if inverse:
+                sb_out = to_gf2_vector(invSBox[int(''.join(map(str, sb_in)), 2)]<<(sbox_idx*SBOX_SIZE), self.blocksize)
+            else:
+                sb_out = to_gf2_vector(SBox[int(''.join(map(str, sb_in)), 2)]<<(sbox_idx*SBOX_SIZE), self.blocksize)
             ct += sb_out
 
         return ct
@@ -138,29 +143,29 @@ class LowMC():
 
         return ct
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Generate the constands for a LowMC instance.')
-    parser.add_argument('-d', '--definition', type=str, nargs=1)
-    parser.add_argument('-s', '--num_sboxes', type=int, nargs='?', default=1)
-    parser.add_argument('-k', '--key', type=str, nargs=1)
-    parser.add_argument('-v', '--verbose', action='count')
-    args = parser.parse_args()
+    def decrypt(self, input, rounds=None):
+        rd = rounds if rounds is not None else self.rounds
+        pt = copy(input)
+        for rn in range(rd):
+            r = self.rounds-rn
+            pt += self.round_keys[r]
+            pt += self.round_constants[r-1]
+            pt =  self.inv_affine_matrixes[r-1]*pt
+            pt =  self.substitution(pt, inverse=True);
+        return pt + self.round_keys[0]
 
-    if args.verbose:
-        verbosity_level = args.verbose
+    def decrypt_reduced(self, input, rounds=None):
+        rd = rounds if rounds is not None else self.rounds
+        pt = copy(input)
+        for rn in range(rd):
+            r = self.rounds-rn
+            pt += self.round_constants[r-1]
+            pt =  self.inv_affine_matrixes[r-1]*pt
+            pt += self.reduced_round_keys[r]
+            pt =  self.substitution(pt, inverse=True);
+        return pt + self.reduced_round_keys[0]
 
-    with open(args.definition[0], 'r') as config_stream:
-        try:
-            lowmc_instance = yaml.load(config_stream)
-        except yaml.YAMLError as exc:
-            print(exc)
-            exit()
-
-    lowmc_instance['settings']['num_sboxes'] = args.num_sboxes
-    lowmc_instance['settings']['key'] = args.key[0]
-
-    lowmc = LowMC(lowmc_instance)
-
+def command_line():
     while True:
         print("lowmc> ", end='')
         try:
@@ -174,6 +179,10 @@ if __name__ == '__main__':
             break
 
         command = line.rstrip().split(" ")
+
+        if command[0] == 'exit':
+            print(" good bye ;)")
+            return
 
         if command[0] == 'print':
             if len(command) < 2:
@@ -227,3 +236,55 @@ if __name__ == '__main__':
 
             ct = lowmc.encrypt(block, rounds) if 'std' in command[0] else lowmc.encrypt_reduced(block, rounds)
             print(ct)
+
+        if command[0].startswith('dec'):
+            if len(command) < 2:
+                print('description command expects the plaintext as the first parameter')
+                continue
+            ct = command[1]
+            try:
+                block = to_gf2_vector(ct, lowmc.blocksize)
+            except TypeError as e:
+                print('Illegal input')
+                debug_output(e, 2)
+                continue
+
+            rounds = int(command[2]) if len(command) > 2 else None
+
+            pt = lowmc.decrypt(block, rounds) if 'std' in command[0] else lowmc.decrypt_reduced(block, rounds)
+            #pt = lowmc.decrypt(block, rounds)
+            print(pt)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Generate the constands for a LowMC instance.')
+    parser.add_argument('-d', '--definition', type=str, nargs=1)
+    parser.add_argument('-s', '--num_sboxes', type=int, nargs='?', default=1)
+    parser.add_argument('-k', '--key', type=str, nargs=1)
+    parser.add_argument('-v', '--verbose', action='count')
+    parser.add_argument('-c', '--command_line', action='store_true')
+    parser.add_argument('-p', '--plaintext', type=str, nargs='*')
+    args = parser.parse_args()
+
+    if args.verbose:
+        verbosity_level = args.verbose
+
+    with open(args.definition[0], 'r') as config_stream:
+        try:
+            lowmc_instance = yaml.load(config_stream)
+        except yaml.YAMLError as exc:
+            print(exc)
+            exit()
+
+    lowmc_instance['settings']['num_sboxes'] = args.num_sboxes
+    lowmc_instance['settings']['key'] = args.key[0]
+
+    lowmc = LowMC(lowmc_instance)
+
+    if args.command_line:
+        command_line()
+
+    if args.plaintext:
+        for pt in args.plaintext:
+            p = to_gf2_vector(pt, lowmc.blocksize)
+            c = lowmc.encrypt(p)
+            print(c)
