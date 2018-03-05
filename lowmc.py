@@ -15,8 +15,8 @@ import argparse
 import yaml
 
 SBOX_SIZE = 3
-SBox = [0x00, 0x01, 0x03, 0x06, 0x07, 0x04, 0x05, 0x02]
-invSBox = [0x00, 0x01, 0x07, 0x02, 0x05, 0x06, 0x03, 0x04]
+SBox = mq.SBox(0x00, 0x01, 0x03, 0x06, 0x07, 0x04, 0x05, 0x02)
+invSBox = mq.SBox(0x00, 0x01, 0x07, 0x02, 0x05, 0x06, 0x03, 0x04)
 
 verbosity_level = 0
 
@@ -101,9 +101,16 @@ class LowMC():
             target_end = self.blocksize - SBOX_SIZE*(sbox_idx)
             sb_in = input[target_end - SBOX_SIZE : target_end]
             if inverse:
-                sb_out = to_gf2_vector(invSBox[int(''.join(map(str, sb_in)), 2)]<<(sbox_idx*SBOX_SIZE), self.blocksize)
+                #sb_out = to_gf2_vector(invSBox[int(''.join(map(str, sb_in)), 2)]<<(sbox_idx*SBOX_SIZE), self.blocksize)
+                sb_out = vector(GF(2),
+                    [0]*(self.blocksize-SBOX_SIZE*(sbox_idx+1)) +
+                    invSBox(sb_in) +
+                    [0]*(SBOX_SIZE*sbox_idx))
             else:
-                sb_out = to_gf2_vector(SBox[int(''.join(map(str, sb_in)), 2)]<<(sbox_idx*SBOX_SIZE), self.blocksize)
+                sb_out = vector(GF(2),
+                    [0]*(self.blocksize-SBOX_SIZE*(sbox_idx+1)) +
+                    SBox(sb_in) +
+                    [0]*(SBOX_SIZE*sbox_idx))
             ct += sb_out
 
         return ct
@@ -154,16 +161,27 @@ class LowMC():
             pt =  self.substitution(pt, inverse=True);
         return pt + self.round_keys[0]
 
+    def decrypt_round_reduced(self, pt, round, round_key=None):
+        pt += self.round_constants[round-1]
+        pt =  self.inv_affine_matrixes[round-1]*pt
+        if round_key is None:
+            pt += self.reduced_round_keys[round]
+        else:
+            pt += round_key
+        pt =  self.substitution(pt, inverse=True);
+        return pt
+
     def decrypt_reduced(self, input, rounds=None):
         rd = rounds if rounds is not None else self.rounds
         pt = copy(input)
         for rn in range(rd):
             r = self.rounds-rn
-            pt += self.round_constants[r-1]
-            pt =  self.inv_affine_matrixes[r-1]*pt
-            pt += self.reduced_round_keys[r]
-            pt =  self.substitution(pt, inverse=True);
-        return pt + self.reduced_round_keys[0]
+            pt = self.decrypt_round_reduced(pt, r)
+
+        if rd == self.rounds:
+            return pt + self.reduced_round_keys[0]
+        else:
+            return pt
 
 def command_line():
     while True:

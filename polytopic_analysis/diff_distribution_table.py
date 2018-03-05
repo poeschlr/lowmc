@@ -51,3 +51,16 @@ print_list(ddt, 'ddt')
 print_list(possible_in_d, 'possible_in_d')
 print_list(possible_out_d, 'possible_out_d')
 print_list(possible_out2_d, 'possible_out2_d')
+
+out_d_f = []
+out_d_r = []
+for id in range(2**sbox_size):
+    out_d_f.append([])
+    out_d_r.append([])
+    for anchor in range(2**sbox_size):
+        out_d_f[id].append(SBox[anchor^id]^SBox[anchor])
+        out_d_r[id].append(invSBox[anchor^id]^invSBox[anchor])
+
+
+print_list(out_d_f, 'ddiff_prob_table_forward')
+print_list(out_d_r, 'ddiff_prob_table_backward')
