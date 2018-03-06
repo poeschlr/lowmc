@@ -15,11 +15,11 @@ from sage.all import *
 import argparse
 import yaml
 import traceback
+import time
 
 SBOX_SIZE = 3
 SBox = mq.SBox(0x00, 0x01, 0x03, 0x06, 0x07, 0x04, 0x05, 0x02)
 invSBox = mq.SBox(0x00, 0x01, 0x07, 0x02, 0x05, 0x06, 0x03, 0x04)
-DDIFF_SIZE = 3
 REFERENCE_PT = 0
 
 class NotEnoughDegreesOfFreedom(Exception):
@@ -54,6 +54,14 @@ def to_gf2_vector(input, size):
         return to_gf2_vector(int(input, 0), size)
     else:
         raise TypeError('can only convert int or correctly formated string to gf2 vector, got {} with type {}'.format(input, type(input)))
+
+def gf2_to_int(input):
+    p = len(input) - 1
+    r = 0
+    for x in input:
+        r += int(x)*2**p
+        p -= 1
+    return int(r)
 
 def print_list(lst, required_verbosity = 0):
     if verbosity_level >= required_verbosity:
@@ -109,6 +117,48 @@ class DDiff():
 
         return '-'*ml + '\n' + str_hist + '-'*ml + '\n' + str_diffs + '-'*ml + '\n\n'
 
+    def __getitem__(self, idx):
+        return self.ddiff[idx]
+
+
+class DDiffHashMap():
+    HASH_SIZE = 2**64
+    def __init__(self):
+        self.ddiffs = {}
+        self.length = 0
+
+    def hash(self, ddiff):
+        dd = gf2_to_int(ddiff[0])
+        return dd % self.HASH_SIZE
+
+    def append(self, ddiff):
+        h = self.hash(ddiff)
+        if h in self.ddiffs:
+            if type(self.ddiffs[h][0]) is list:
+                if ddiff not in self.ddiffs[h]:
+                    self.length += 1
+                    self.ddiffs[h].append(ddiff)
+            else:
+                if self.ddiffs[h] != ddiff:
+                    self.ddiffs[h] = [self.ddiffs[h], ddiff]
+                    self.length += 1
+        else:
+            self.ddiffs[h] = ddiff
+            self.length += 1
+
+    def __contains__(self, ddiff):
+        h = self.hash(ddiff)
+        if h in self.ddiffs:
+            if type(self.ddiffs[h][0]) is list:
+                return ddiff in self.ddiffs[h]
+            return self.ddiffs[h] == ddiff
+        return False
+
+    def __len__(self):
+        return self.length
+
+    def __str__(self):
+        return str(self.ddiffs.keys())
 
 class LowMC():
 
@@ -299,6 +349,7 @@ class LowMC():
             else:
                 if round == self.rounds_with_prop1-1:
                     self.posibility_space.append(sb_activation.right_kernel())
+                    print(self.posibility_space[-1])
                     old_rank = rank(sb_activation)
                     #print("Num guaranteed rounds={:d}, rank={:d}".format(round, old_rank))
 
@@ -359,7 +410,9 @@ class LowMC():
         else:
             in_ddiff_local = in_ddiff
 
+
         out_ddiffs = []
+
         for possible_anchor in self.possible_reduced_keys:
             out_ddiff = []
 
@@ -390,9 +443,18 @@ class LowMC():
         print('ddiffs after round {}: {}'.format(0, len(ddiffs_after_round)))
         print_list(ddiffs_after_round)
         for r in range(1, round):
-            ddiffs_after_round = []
+            last_round = r == round - 1
+            #print('round {}, last round? {}'.format(r, last_round))
+            if last_round:
+                ddiffs_after_round = DDiffHashMap()
+            else:
+                ddiffs_after_round = []
             for ddiff in ddiffs_current_round:
-                ddiffs_after_round += self.propagate_ddiff(ddiff, r, inverse=False)
+                if last_round:
+                    for dd in self.propagate_ddiff(ddiff, r, inverse=False):
+                        ddiffs_after_round.append(dd)
+                else:
+                    ddiffs_after_round += self.propagate_ddiff(ddiff, r, inverse=False)
                 #ToDo remove dublicates.
             print('ddiffs after round {}: {}'.format(r, len(ddiffs_after_round)))
             ddiffs_current_round = ddiffs_after_round
@@ -405,23 +467,23 @@ class LowMC():
 
         ddiffs_after_round = ddiffs_current_round # make it work for trails of lenght 1
         for r in range(from_round - 1, to_round-1, -1):
-            print('round {}'.format(r))
+            last_round = r == to_round
             ddiffs_after_round = []
             for ddiff in ddiffs_current_round:
                 ddiffs_after_round += self.propagate_ddiff(ddiff, r, inverse=True)
                 #ToDo remove dublicates.
 
             ddiffs_current_round = ddiffs_after_round
+            print('ddiffs before round {}: {}'.format(r, len(ddiffs_after_round)))
             #print('ddiffs before round {}: {}'.format(r, len(ddiffs_after_round)))
 
         return ddiffs_after_round
 
-def check_collision(ddiff_1, ddiff_2):
+def check_collision(ddiff_forward, ddiff_backward):
     possible_trails = []
-    for d1 in ddiff_1:
-        for d2 in ddiff_2:
-            if d1 == d2:
-                possible_trails.append(d1.history)
+    for d_b in ddiff_backward:
+        if d_b in ddiff_forward:
+            possible_trails.append(d_b.history)
 
     return possible_trails
 
@@ -431,6 +493,7 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--num_sboxes', type=int, nargs='?', default=1)
     parser.add_argument('-k', '--key', type=str, nargs='?', default=1)
     parser.add_argument('-v', '--verbose', action='count')
+    parser.add_argument('-z', '--ddiff_size', type=int, nargs='?', default=3)
     args = parser.parse_args()
 
     with open(args.definition[0], 'r') as config_stream:
@@ -448,9 +511,10 @@ if __name__ == '__main__':
 
     lowmc.getInputForGoodTrail()
     try:
-        ddiff_pt_side = lowmc.get_optimal_ddiff_of_len(DDIFF_SIZE)
+        ddiff_pt_side = lowmc.get_optimal_ddiff_of_len(args.ddiff_size)
     except NotEnoughDegreesOfFreedom as e:
         print(e)
+        print_list(lowmc.posibility_space)
         exit()
     else:
         traceback.print_exc()
@@ -466,10 +530,12 @@ if __name__ == '__main__':
     #print_list(ct)
 
     # ddiff_ct_side = [ct[0] + ct[i] for i in range(1,len(ct))]
-
+    print(time.strftime("%H:%M:%S", time.localtime()))
     round_mid = lowmc.rounds_with_prop1 + ceil((lowmc.rounds-lowmc.rounds_with_prop1)/2)
     ddiff_m_f = lowmc.propagate_ddiff_forward_till_round(ddiff_pt_side,round_mid)
     print('forward probagation resulted in {} ddiffs'.format(len(ddiff_m_f)))
+    #print(ddiff_m_f)
+    print(time.strftime("%H:%M:%S", time.localtime()))
 
     #round_key=lowmc.round_keys[lowmc.rounds]
     #ct_before_round = [lowmc.decrypt_round_reduced(input=c, round=lowmc.rounds) for c in ct]
@@ -494,31 +560,48 @@ if __name__ == '__main__':
     ddiff_ct_side = DDiff([ct[0] + ct[i] for i in range(1,len(ct))])
     #print(ddiff_ct_side)
     ddiff_m_b = lowmc.propagate_ddiff_backward_from_to_round(ddiff_ct_side, lowmc.rounds, round_mid)
+    print(time.strftime("%H:%M:%S", time.localtime()))
 
+    #exit()
     print('trails:')
-    possible_trails = check_collision(ddiff_m_b, ddiff_m_f)
+    possible_trails = check_collision(ddiff_backward=ddiff_m_b, ddiff_forward=ddiff_m_f)
     print_list(possible_trails)
-
+    print(time.strftime("%H:%M:%S", time.localtime()))
 
     possible_keys0 = []
     possible_keys1 = []
+
+    rb = lowmc.blocksize - 3
+    round_keys = []
     for t in possible_trails:
-        rb = lowmc.blocksize - 3
-        c = lowmc.round_constants[-1] + ct[0]
-        c = lowmc.inv_affine_matrixes[-1]*c
-        k0 = vector(GF(2), [0]*rb + list((c + t[0])[-3:]))
-        possible_keys0.append(k0)
-        c += k0
-        c = lowmc.substitution(c, inverse=True)
-        c += lowmc.round_constants[-2]
-        c = lowmc.inv_affine_matrixes[-2]*c
-        k1 = vector(GF(2), [0]*rb + list((c + t[1])[-3:]))
-        possible_keys1.append(k1)
+        round_keys.append([])
+        i = -1
+        c = ct[0]
+        for a in t:
+            c += lowmc.round_constants[i]
+            c = lowmc.inv_affine_matrixes[i]*c
+            ck = vector(GF(2), [0]*rb + list((c + a)[-3:]))
+            round_keys[-1].append(ck)
+            c += ck
+            c = lowmc.substitution(c, inverse=True)
+            i -= 1
 
-    print('correct round key is:\n{}'.format(lowmc.reduced_round_keys[lowmc.rounds]))
-    print('possible keys:')
-    print_list(possible_keys0)
+        # c = lowmc.round_constants[-1] + ct[0]
+        # c = lowmc.inv_affine_matrixes[-1]*c
+        # k0 = vector(GF(2), [0]*rb + list((c + t[0])[-3:]))
+        # possible_keys0.append(k0)
+        # c += k0
+        # c = lowmc.substitution(c, inverse=True)
+        # c += lowmc.round_constants[-2]
+        # c = lowmc.inv_affine_matrixes[-2]*c
+        # k1 = vector(GF(2), [0]*rb + list((c + t[1])[-3:]))
+        # possible_keys1.append(k1)
 
-    print('correct round key is:\n{}'.format(lowmc.reduced_round_keys[lowmc.rounds-1]))
-    print('possible keys:')
-    print_list(possible_keys1)
+    print("correct roundkeys:")
+    print_list(lowmc.reduced_round_keys)
+
+    print("got:")
+    for g in round_keys:
+        print_list(g)
+
+    print(time.strftime("%H:%M:%S", time.localtime()))
