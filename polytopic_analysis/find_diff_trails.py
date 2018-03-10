@@ -77,16 +77,30 @@ def debug_output(msg, required_verbosity = 0, end='\n'):
     if verbosity_level >= required_verbosity:
         print(msg, end=end)
 
-class DDiff():
-    def __init__(self, ddiff, old_history = None, new_history_item = None):
+class DDiff(object):
+    HASH_SIZE = 2**64
+    def __init__(self, ddiff, old_history = [], new_history_item = None):
+        #ToDo check that ddiff is a list of gf(2) vectors.
         self.ddiff = ddiff
-        if old_history is None:
-            self.history = []
-            return
-        self.history = copy(old_history)
 
+        self.history = copy(old_history)
         if new_history_item is not None:
             self.history.append(new_history_item)
+
+    def merge(self, other):
+        if self == other:
+            for i in range(len(self.history)):
+                if other.history[i] is None:
+                    oh = [None]
+                else:
+                    oh = other.history[i]
+                if type(self.history[i]) == list:
+                    self.history[i].extend(oh)
+                else:
+                    self.history[i] = [self.history[i]]
+                    self.history[i].extend(oh)
+        else:
+            raise ValueError('Merging d-diffs (history) only allowed if they are equal.')
 
     def __eq__(self, other):
         if type(other) == DDiff:
@@ -120,36 +134,53 @@ class DDiff():
     def __getitem__(self, idx):
         return self.ddiff[idx]
 
+    def __iter__(self):
+        for d in self.ddiff:
+            yield d
 
-class DDiffHashMap():
-    HASH_SIZE = 2**64
+    def __hash__(self):
+        dd = gf2_to_int(self.ddiff[0])
+        return dd % self.HASH_SIZE
+
+
+
+class DDiffHashMap(object):
     def __init__(self):
         self.ddiffs = {}
         self.length = 0
 
-    def hash(self, ddiff):
-        dd = gf2_to_int(ddiff[0])
-        return dd % self.HASH_SIZE
-
     def append(self, ddiff):
-        h = self.hash(ddiff)
-        if h in self.ddiffs:
-            if type(self.ddiffs[h][0]) is list:
-                if ddiff not in self.ddiffs[h]:
-                    self.length += 1
-                    self.ddiffs[h].append(ddiff)
-            else:
-                if self.ddiffs[h] != ddiff:
-                    self.ddiffs[h] = [self.ddiffs[h], ddiff]
-                    self.length += 1
+        if type(ddiff) == list:
+            ddiff_to_append = DDiff(ddiff)
+        elif type(ddiff) == DDiff:
+            ddiff_to_append = ddiff
         else:
-            self.ddiffs[h] = ddiff
+            raise TypeError('DDiff hashmap only supports appending DDiffs or lists of diffs (= list of GF(2) vectors)')
+
+
+        h = hash(ddiff_to_append)
+        if h in self.ddiffs:
+            if type(self.ddiffs[h]) is list:
+                if ddiff_to_append not in self.ddiffs[h]:
+                    self.length += 1
+                    self.ddiffs[h].append(ddiff_to_append)
+                else:
+                    i = self.ddiffs[h].index(ddiff_to_append)
+                    self.ddiffs[h][i].merge(ddiff_to_append)
+            else:
+                if self.ddiffs[h] != ddiff_to_append:
+                    self.ddiffs[h] = [self.ddiffs[h], ddiff_to_append]
+                    self.length += 1
+                else:
+                    self.ddiffs[h].merge(ddiff_to_append)
+        else:
+            self.ddiffs[h] = ddiff_to_append
             self.length += 1
 
     def __contains__(self, ddiff):
-        h = self.hash(ddiff)
+        h = hash(ddiff)
         if h in self.ddiffs:
-            if type(self.ddiffs[h][0]) is list:
+            if type(self.ddiffs[h]) is list:
                 return ddiff in self.ddiffs[h]
             return self.ddiffs[h] == ddiff
         return False
@@ -158,9 +189,24 @@ class DDiffHashMap():
         return self.length
 
     def __str__(self):
-        return str(self.ddiffs.keys())
+        r = ''
+        for ddiff in self:
+            r += str(ddiff)
+        return r
 
-class LowMC():
+    def strDebug(self, h):
+        return str(self.ddiffs[h])
+
+    def __iter__(self):
+        for h in self.ddiffs:
+            if type(self.ddiffs[h]) is list:
+                for ddiff in self.ddiffs[h]:
+                    yield ddiff
+            else:
+                print('not a list')
+                yield self.ddiffs[h]
+
+class LowMC(object):
 
     def __init__(self, lowmc_instance_description):
         self.blocksize = lowmc_instance_description['settings']['blocksize']
@@ -406,9 +452,14 @@ class LowMC():
 
     def propagate_ddiff(self, in_ddiff, round, inverse = False):
         if inverse:
-            in_ddiff_local = [self.inv_affine_matrixes[round]*d for d in in_ddiff.ddiff]
+            in_ddiff_local = [self.inv_affine_matrixes[round]*d for d in in_ddiff]
         else:
-            in_ddiff_local = in_ddiff
+            if type(in_ddiff) == DDiff:
+                in_ddiff_local = in_ddiff.ddiff
+            elif type(in_ddiff) == list:
+                in_ddiff_local = in_ddiff
+            else:
+                raise TypeError('in_ddiff must be of type DDiff or list of diffs. Type is {}'.format(type(in_ddiff)))
 
 
         out_ddiffs = []
@@ -425,37 +476,41 @@ class LowMC():
                     out_diff = self.affine_matrixes[round] * out_diff
                 out_ddiff.append(out_diff)
 
-
-            if inverse:
-                out_ddiffs.append(DDiff(out_ddiff, in_ddiff.history, possible_anchor))
-            else:
-                if out_ddiff not in out_ddiffs:
-                    out_ddiffs.append(out_ddiff)
+            out_ddiffs.append(DDiff(out_ddiff, in_ddiff.history, possible_anchor))
 
         return out_ddiffs
+
+    def propagate_ddiff_inactive(self, in_ddiff, round, inverse = False):
+        if inverse:
+            return DDiff([self.inv_affine_matrixes[round]*d for d in in_ddiff])
+        else:
+            return DDiff([self.affine_matrixes[round]*d for d in in_ddiff])
 
 
 
     def propagate_ddiff_forward_till_round(self, in_ddiff, round):
-        ddiffs_current_round = self.propagate_ddiff(in_ddiff, 0, inverse=False)
+        ddiff_current_round = in_ddiff
 
-        ddiffs_after_round = ddiffs_current_round # make it work for trails of lenght 1
-        print('ddiffs after round {}: {}'.format(0, len(ddiffs_after_round)))
-        print_list(ddiffs_after_round)
-        for r in range(1, round):
-            last_round = r == round - 1
+        ddiffs_after_round = [ddiff_current_round] # make it work for trails of lenght 1
+
+        #print_list(ddiffs_after_round)
+
+        for r in range(self.rounds_with_prop1):
+            ddiff_current_round = self.propagate_ddiff_inactive(ddiff_current_round, r, inverse=False)
+            print('ddiff for inactive round {} calculated'.format(r))
+
+        ddiffs_current_round = [ddiff_current_round]
+        ddiffs_after_round = ddiffs_current_round
+
+
+        for r in range(self.rounds_with_prop1, round):
+
             #print('round {}, last round? {}'.format(r, last_round))
-            if last_round:
-                ddiffs_after_round = DDiffHashMap()
-            else:
-                ddiffs_after_round = []
+            ddiffs_after_round = DDiffHashMap()
+
             for ddiff in ddiffs_current_round:
-                if last_round:
-                    for dd in self.propagate_ddiff(ddiff, r, inverse=False):
-                        ddiffs_after_round.append(dd)
-                else:
-                    ddiffs_after_round += self.propagate_ddiff(ddiff, r, inverse=False)
-                #ToDo remove dublicates.
+                for dd in self.propagate_ddiff(ddiff, r, inverse=False):
+                    ddiffs_after_round.append(dd)
             print('ddiffs after round {}: {}'.format(r, len(ddiffs_after_round)))
             ddiffs_current_round = ddiffs_after_round
             #print("Num ddiffs after round {} is {}".format(r, len(ddiffs_current_round)))
@@ -467,10 +522,10 @@ class LowMC():
 
         ddiffs_after_round = ddiffs_current_round # make it work for trails of lenght 1
         for r in range(from_round - 1, to_round-1, -1):
-            last_round = r == to_round
-            ddiffs_after_round = []
+            ddiffs_after_round = DDiffHashMap()
             for ddiff in ddiffs_current_round:
-                ddiffs_after_round += self.propagate_ddiff(ddiff, r, inverse=True)
+                for dd in self.propagate_ddiff(ddiff, r, inverse=True):
+                    ddiffs_after_round.append(dd)
                 #ToDo remove dublicates.
 
             ddiffs_current_round = ddiffs_after_round
