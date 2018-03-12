@@ -79,26 +79,26 @@ def debug_output(msg, required_verbosity = 0, end='\n'):
 
 class DDiff(object):
     HASH_SIZE = 2**64
-    def __init__(self, ddiff, old_history = [], new_history_item = None):
+    def __init__(self, ddiff, other = None, new_history_item = None):
+        if other is not None and type(other) is not DDiff:
+            raise TypeError('init for DDiff expects other to be None or of type DDiff.')
         #ToDo check that ddiff is a list of gf(2) vectors.
         self.ddiff = ddiff
 
-        self.history = copy(old_history)
+        self.history = []
+        if other is not None:
+            for other_trail in other.history:
+                self.history.append(copy(other_trail))
+        else:
+            self.history.append([])
+
         if new_history_item is not None:
-            self.history.append(new_history_item)
+            for trail in self.history:
+                trail.append(new_history_item)
 
     def merge(self, other):
         if self == other:
-            for i in range(len(self.history)):
-                if other.history[i] is None:
-                    oh = [None]
-                else:
-                    oh = other.history[i]
-                if type(self.history[i]) == list:
-                    self.history[i].extend(oh)
-                else:
-                    self.history[i] = [self.history[i]]
-                    self.history[i].extend(oh)
+            self.history.extend(other.history)
         else:
             raise ValueError('Merging d-diffs (history) only allowed if they are equal.')
 
@@ -476,7 +476,7 @@ class LowMC(object):
                     out_diff = self.affine_matrixes[round] * out_diff
                 out_ddiff.append(out_diff)
 
-            out_ddiffs.append(DDiff(out_ddiff, in_ddiff.history, possible_anchor))
+            out_ddiffs.append(DDiff(out_ddiff, in_ddiff, possible_anchor))
 
         return out_ddiffs
 
@@ -538,7 +538,7 @@ def check_collision(ddiff_forward, ddiff_backward):
     possible_trails = []
     for d_b in ddiff_backward:
         if d_b in ddiff_forward:
-            possible_trails.append(d_b.history)
+            possible_trails.extend(d_b.history)
 
     return possible_trails
 
