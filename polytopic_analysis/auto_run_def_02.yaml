@@ -1,0 +1,8 @@
+- setup:
+      blocksize: 8
+      keysize: 8
+      rounds: 16
+  tests:
+    - rounds: 16
+      key: 'random'
+      repeat: 1

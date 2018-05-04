@@ -1,0 +1,23 @@
+- setup:
+      blocksize: 32
+      keysize: 32
+      rounds: 24
+  tests:
+    - rounds: 14
+      key: 'random'
+      repeat: 10
+    - rounds: 16
+      key: 'random'
+      repeat: 10
+    - rounds: 18
+      key: 'random'
+      repeat: 10
+    - rounds: 20
+      key: 'random'
+      repeat: 6
+    - rounds: 22
+      key: 'random'
+      repeat: 6
+    - rounds: 24
+      key: 'random'
+      repeat: 1

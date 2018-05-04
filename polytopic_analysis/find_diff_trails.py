@@ -10,6 +10,13 @@ from __future__ import print_function
 from __future__ import division
 #import Exception
 
+import os
+os.environ["SAGE_LOCAL"] = '/usr/lib64/sagemath/local'
+
+import sys
+sys.path.append("../")
+from generate_matrices import instantiate_matrix, grain_ssg
+
 from ddt import *
 from sage.all import *
 import argparse
@@ -21,6 +28,14 @@ SBOX_SIZE = 3
 SBox = mq.SBox(0x00, 0x01, 0x03, 0x06, 0x07, 0x04, 0x05, 0x02)
 invSBox = mq.SBox(0x00, 0x01, 0x07, 0x02, 0x05, 0x06, 0x03, 0x04)
 REFERENCE_PT = 0
+
+num_ddiffs_after_round = []
+num_ddiffs_before_round = []
+
+def log(logline, logfile):
+    print(logline)
+    logfile.write(logline+'\n')
+
 
 class NotEnoughDegreesOfFreedom(Exception):
     def __init__(self, required_degrees, degrees):
@@ -52,6 +67,8 @@ def to_gf2_vector(input, size):
         return vector(GF(2), [x for x in list('{0:0{width}b}'.format(input, width=size))])
     elif isstr(input):
         return to_gf2_vector(int(input, 0), size)
+    elif type(input) is list and len(input) == size:
+        return vector(GF(2), input)
     else:
         raise TypeError('can only convert int or correctly formated string to gf2 vector, got {} with type {}'.format(input, type(input)))
 
@@ -78,7 +95,7 @@ def debug_output(msg, required_verbosity = 0, end='\n'):
         print(msg, end=end)
 
 class DDiff(object):
-    HASH_SIZE = 2**64
+    HASH_SIZE = 2**32
     def __init__(self, ddiff, other = None, new_history_item = None):
         if other is not None and type(other) is not DDiff:
             raise TypeError('init for DDiff expects other to be None or of type DDiff.')
@@ -139,7 +156,10 @@ class DDiff(object):
             yield d
 
     def __hash__(self):
-        dd = gf2_to_int(self.ddiff[0])
+        dd = self.ddiff[0]
+        for i in range(1,len(self.ddiff)):
+            dd += self.ddiff[i]
+        dd = gf2_to_int(dd)
         return dd % self.HASH_SIZE
 
 
@@ -185,6 +205,18 @@ class DDiffHashMap(object):
             return self.ddiffs[h] == ddiff
         return False
 
+    def find(self, ddiff):
+        h = hash(ddiff)
+        if h in self.ddiffs:
+            if type(self.ddiffs[h]) is list:
+                for d in self.ddiffs[h]:
+                    if d == ddiff:
+                        return d
+            elif self.ddiffs[h] == ddiff:
+                return self.ddiffs[h]
+        return None
+
+
     def __len__(self):
         return self.length
 
@@ -207,8 +239,43 @@ class DDiffHashMap(object):
                 yield self.ddiffs[h]
 
 class LowMC(object):
+    def generate_random(self, generator_settings):
+        self.blocksize = generator_settings.get('blocksize', 32)
+        self.keysize = generator_settings.get('keysize', 32)
+        self.num_sboxes = generator_settings.get('num_sboxes', 1)
+        self.rounds = generator_settings.get('rounds', 24)
+        self.rounds_with_prop1 = ceil(self.blocksize/(self.num_sboxes*SBOX_SIZE))-1
 
-    def __init__(self, lowmc_instance_description):
+        print("Generate random matrixes ", end="")
+
+        gen = grain_ssg()
+        self.affine_matrixes = []
+        self.inv_affine_matrixes = []
+        for _ in range(self.rounds):
+            M = matrix(GF(2), instantiate_matrix(self.blocksize, self.blocksize, gen))
+            self.affine_matrixes.append(M)
+            self.inv_affine_matrixes.append(M**-1)
+
+        self.round_constants = []
+        for _ in range(self.rounds):
+            constant = vector(GF(2), [next(gen) for _ in range(self.blocksize)])
+            self.round_constants.append(constant)
+
+        self.key_matrixes = []
+        for _ in range(self.rounds + 1):
+            mat = matrix(GF(2),instantiate_matrix(self.blocksize, self.keysize, gen))
+            self.key_matrixes.append(mat)
+
+        print("[   Done   ]")
+
+        self.diff_propagation_forward = init_diff_propagation(possible_out_d)
+        self.diff_propagation_backward = init_diff_propagation(possible_in_d)
+
+        self.possible_reduced_keys = self.init_possible_reduced_keys()
+
+        self.set_key(generator_settings.get('key', [next(gen) for _ in range(self.keysize)]))
+
+    def from_description_file(self, lowmc_instance_description):
         self.blocksize = lowmc_instance_description['settings']['blocksize']
         self.keysize = lowmc_instance_description['settings']['keysize']
         self.num_sboxes = lowmc_instance_description['settings']['num_sboxes']
@@ -225,6 +292,14 @@ class LowMC(object):
         self.possible_reduced_keys = self.init_possible_reduced_keys()
 
         self.set_key(lowmc_instance_description['settings']['key'])
+
+
+    def __init__(self, lowmc_instance_description=None, generator_settings=None):
+        if lowmc_instance_description:
+            self.from_description_file(lowmc_instance_description)
+        elif generator_settings:
+            self.generate_random(generator_settings)
+
 
     def init_possible_reduced_keys(self, sbox_idx=0):
         pk = []
@@ -247,6 +322,7 @@ class LowMC(object):
 
     def set_key(self, key):
         debug_output("Setup roundkeys from key ", 1, end="")
+        #print(key)
         key = to_gf2_vector(key, self.keysize)
         self.round_keys = []
         for r in range(self.rounds + 1):
@@ -392,11 +468,13 @@ class LowMC(object):
 
             if round < self.rounds_with_prop1-1:
                 sb_activation = matrix(GF(2), sb_activation.rows() + new_equations)
+                old_rank = rank(sb_activation)
             else:
                 if round == self.rounds_with_prop1-1:
                     self.posibility_space.append(sb_activation.right_kernel())
-                    print(self.posibility_space[-1])
+                    #print(self.posibility_space[-1])
                     old_rank = rank(sb_activation)
+                    print("rank after rounds with propability 1: {}, expected: {}, round: {}".format(old_rank, 3*(round), round))
                     #print("Num guaranteed rounds={:d}, rank={:d}".format(round, old_rank))
 
                 idx = num_sbox_bits
@@ -406,6 +484,7 @@ class LowMC(object):
                     if rank(sb_activation) > old_rank:
                         old_rank = rank(sb_activation)
                         self.posibility_space.append(sb_activation.right_kernel())
+            print("after round {} rank = {}".format(round,old_rank))
 
         zero_bits = [0]*num_sbox_bits
 
@@ -489,6 +568,8 @@ class LowMC(object):
 
 
     def propagate_ddiff_forward_till_round(self, in_ddiff, round):
+        global num_ddiffs_after_round
+
         ddiff_current_round = in_ddiff
 
         ddiffs_after_round = [ddiff_current_round] # make it work for trails of lenght 1
@@ -497,7 +578,8 @@ class LowMC(object):
 
         for r in range(self.rounds_with_prop1):
             ddiff_current_round = self.propagate_ddiff_inactive(ddiff_current_round, r, inverse=False)
-            print('ddiff for inactive round {} calculated'.format(r))
+            debug_output('ddiff for inactive round {} calculated'.format(r), 1)
+            num_ddiffs_after_round[r] = 1
 
         ddiffs_current_round = [ddiff_current_round]
         ddiffs_after_round = ddiffs_current_round
@@ -511,13 +593,15 @@ class LowMC(object):
             for ddiff in ddiffs_current_round:
                 for dd in self.propagate_ddiff(ddiff, r, inverse=False):
                     ddiffs_after_round.append(dd)
-            print('ddiffs after round {}: {}'.format(r, len(ddiffs_after_round)))
+            debug_output('ddiffs after round {}: {}'.format(r, len(ddiffs_after_round)), 1)
+            num_ddiffs_after_round[r] = len(ddiffs_after_round)
             ddiffs_current_round = ddiffs_after_round
             #print("Num ddiffs after round {} is {}".format(r, len(ddiffs_current_round)))
 
         return ddiffs_after_round
 
     def propagate_ddiff_backward_from_to_round(self, in_ddiff, from_round, to_round):
+        global num_ddiffs_before_round
         ddiffs_current_round = [in_ddiff]#self.propagate_ddiff(in_ddiff, from_round, 'B')
 
         ddiffs_after_round = ddiffs_current_round # make it work for trails of lenght 1
@@ -529,7 +613,8 @@ class LowMC(object):
                 #ToDo remove dublicates.
 
             ddiffs_current_round = ddiffs_after_round
-            print('ddiffs before round {}: {}'.format(r, len(ddiffs_after_round)))
+            debug_output('ddiffs before round {}: {}'.format(r, len(ddiffs_after_round)), 1)
+            num_ddiffs_before_round[r] = len(ddiffs_after_round)
             #print('ddiffs before round {}: {}'.format(r, len(ddiffs_after_round)))
 
         return ddiffs_after_round
@@ -537,33 +622,22 @@ class LowMC(object):
 def check_collision(ddiff_forward, ddiff_backward):
     possible_trails = []
     for d_b in ddiff_backward:
-        if d_b in ddiff_forward:
-            possible_trails.extend(d_b.history)
+        d_f = ddiff_forward.find(d_b)
+        if d_f is not None:
+            x = {'back': d_b.history,
+                'forward': d_f.history}
+            possible_trails.append(x)
 
     return possible_trails
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Generate the constands for a LowMC instance.')
-    parser.add_argument('-d', '--definition', type=str, nargs=1)
-    parser.add_argument('-s', '--num_sboxes', type=int, nargs='?', default=1)
-    parser.add_argument('-k', '--key', type=str, nargs='?', default=1)
-    parser.add_argument('-v', '--verbose', action='count')
-    parser.add_argument('-z', '--ddiff_size', type=int, nargs='?', default=3)
-    args = parser.parse_args()
 
-    with open(args.definition[0], 'r') as config_stream:
-        try:
-            lowmc_instance = yaml.load(config_stream)
-        except yaml.YAMLError as exc:
-            print(exc)
-            exit()
+def attack(lowmc, logfile, only_trail = False):
+    global num_ddiffs_after_round
+    num_ddiffs_after_round = [0]*lowmc.rounds
+    global num_ddiffs_before_round
+    num_ddiffs_before_round = [0]*lowmc.rounds
 
-    lowmc_instance['settings']['num_sboxes'] = args.num_sboxes
-    lowmc_instance['settings']['key'] = args.key
-
-
-    lowmc = LowMC(lowmc_instance)
-
+    t_start=time.time()
     lowmc.getInputForGoodTrail()
     try:
         ddiff_pt_side = lowmc.get_optimal_ddiff_of_len(args.ddiff_size)
@@ -574,6 +648,12 @@ if __name__ == '__main__':
     else:
         traceback.print_exc()
 
+    if only_trail:
+        print_list(lowmc.posibility_space)
+        print_list(ddiff_pt_side)
+        return
+
+    t_init=time.time()
     pt = [to_gf2_vector(REFERENCE_PT, lowmc.blocksize)]
     for d in ddiff_pt_side:
         pt.append(pt[0]+d)
@@ -585,78 +665,175 @@ if __name__ == '__main__':
     #print_list(ct)
 
     # ddiff_ct_side = [ct[0] + ct[i] for i in range(1,len(ct))]
-    print(time.strftime("%H:%M:%S", time.localtime()))
+    #print(time.strftime("%H:%M:%S", time.localtime()))
+    t_enc=time.time()
     round_mid = lowmc.rounds_with_prop1 + ceil((lowmc.rounds-lowmc.rounds_with_prop1)/2)
     ddiff_m_f = lowmc.propagate_ddiff_forward_till_round(ddiff_pt_side,round_mid)
-    print('forward probagation resulted in {} ddiffs'.format(len(ddiff_m_f)))
+    #print('forward probagation resulted in {} ddiffs'.format(len(ddiff_m_f)))
+    #print(num_ddiffs_after_round)
     #print(ddiff_m_f)
-    print(time.strftime("%H:%M:%S", time.localtime()))
-
-    #round_key=lowmc.round_keys[lowmc.rounds]
-    #ct_before_round = [lowmc.decrypt_round_reduced(input=c, round=lowmc.rounds) for c in ct]
-
-    #print_list(ct)
-    #print_list(ct_before_round)
-
-    #ct_before_round = [lowmc.decrypt_reduced(input=c, rounds=1) for c in ct]
-    #print_list(ct)
-    #print_list(ct_before_round)
-
-
-    # possible_keys = []
-    # for k in lowmc.possible_reduced_keys:
-    #     ct_before_round = [lowmc.decrypt_round_reduced(input=c, round=lowmc.rounds, round_key=k) for c in ct]
-    #     #print_list(ct_before_round)
-    #     ddiff_ct_side = [ct_before_round[0] + ct_before_round[i] for i in range(1,len(ct))]
-    #     ddiff_m_b = lowmc.propagate_ddiff_backward_from_to_round(ddiff_ct_side,lowmc.rounds-1,round_mid)
-    #     if check_collision(ddiff_m_b, ddiff_m_f):
-    #         possible_keys.append(k)
+    #print(time.strftime("%H:%M:%S", time.localtime()))
+    t_forward=time.time()
 
     ddiff_ct_side = DDiff([ct[0] + ct[i] for i in range(1,len(ct))])
     #print(ddiff_ct_side)
     ddiff_m_b = lowmc.propagate_ddiff_backward_from_to_round(ddiff_ct_side, lowmc.rounds, round_mid)
-    print(time.strftime("%H:%M:%S", time.localtime()))
+    #print(num_ddiffs_before_round)
+    #print(time.strftime("%H:%M:%S", time.localtime()))
+    t_backward=time.time()
 
     #exit()
-    print('trails:')
+    #print('trails:')
     possible_trails = check_collision(ddiff_backward=ddiff_m_b, ddiff_forward=ddiff_m_f)
-    print_list(possible_trails)
-    print(time.strftime("%H:%M:%S", time.localtime()))
-
-    possible_keys0 = []
-    possible_keys1 = []
+    #print_list(possible_trails)
+    #print(time.strftime("%H:%M:%S", time.localtime()))
+    t_collision=time.time()
 
     rb = lowmc.blocksize - 3
     round_keys = []
-    for t in possible_trails:
+    for i in range(lowmc.rounds + 1):
         round_keys.append([])
-        i = -1
-        c = ct[0]
-        for a in t:
-            c += lowmc.round_constants[i]
-            c = lowmc.inv_affine_matrixes[i]*c
-            ck = vector(GF(2), [0]*rb + list((c + a)[-3:]))
-            round_keys[-1].append(ck)
-            c += ck
-            c = lowmc.substitution(c, inverse=True)
-            i -= 1
 
-        # c = lowmc.round_constants[-1] + ct[0]
-        # c = lowmc.inv_affine_matrixes[-1]*c
-        # k0 = vector(GF(2), [0]*rb + list((c + t[0])[-3:]))
-        # possible_keys0.append(k0)
-        # c += k0
-        # c = lowmc.substitution(c, inverse=True)
-        # c += lowmc.round_constants[-2]
-        # c = lowmc.inv_affine_matrixes[-2]*c
-        # k1 = vector(GF(2), [0]*rb + list((c + t[1])[-3:]))
-        # possible_keys1.append(k1)
+    #print_list(round_keys)
+    num_trails_forward = 0;
+    num_trails_backward = 0;
 
-    print("correct roundkeys:")
-    print_list(lowmc.reduced_round_keys)
+    for collision in possible_trails:
+        num_trails_forward += len(collision['forward'])
+        num_trails_backward += len(collision['back'])
+        for t in collision['back']:
+            i = lowmc.rounds-1
+            c = ct[0]
+            for a in t:
+                c += lowmc.round_constants[i]
+                c = lowmc.inv_affine_matrixes[i]*c
+                ck = vector(GF(2), [0]*rb + list((c + a)[-3:]))
+                if ck not in round_keys[i+1]:
+                    round_keys[i+1].append(ck)
+                c += ck
+                c = lowmc.substitution(c, inverse=True)
+                i -= 1
+    #print(time.strftime("%H:%M:%S", time.localtime()))
+    t_roundkeys=time.time()
 
-    print("got:")
-    for g in round_keys:
-        print_list(g)
+    #############################################################
+    #                     Print sumary                          #
+    #############################################################
+    #print_list(lowmc.reduced_round_keys)
+    #print_list(round_keys)
 
-    print(time.strftime("%H:%M:%S", time.localtime()))
+    keys_ok = True
+    keys_found = 0
+    for i in range(lowmc.rounds + 1):
+        if len(round_keys[i]) >= 1:
+            if lowmc.reduced_round_keys[i] not in round_keys[i]:
+                keys_ok = False
+            else:
+                keys_found += 1
+
+    log('{bs:d}, {ks:d}, {nr:d}, {dds:d}, {dd_f:s}, {dd_b:s}, '\
+            '{t_find:.3f}, {t_enc:.3f}, {t_forward:.3f}, '\
+            '{t_backward:.3f}, {t_collision:.3f}, {t_roundkeys:.3f}, '\
+            '{num_collisions:d}, {num_trails_forward:d}, {num_trails_backward:d}, '\
+            '{key_ok:s}'.format(
+        bs=lowmc.blocksize, ks=lowmc.keysize, nr=lowmc.rounds, dds=3,
+        dd_f=str(num_ddiffs_after_round[:round_mid]).replace(',',';'),
+        dd_b=str(num_ddiffs_before_round[round_mid:]).replace(',',';'),
+        t_find=t_init - t_start, t_enc=t_enc - t_init,
+        t_forward=t_forward - t_enc, t_backward=t_backward - t_forward,
+        t_collision=t_collision - t_backward, t_roundkeys=t_roundkeys - t_collision,
+        num_collisions=len(possible_trails),
+        num_trails_forward=num_trails_forward,
+        num_trails_backward=num_trails_backward,
+        key_ok='{:d} roundkeys found -- '.format(keys_found) + ('[  OK  ]' if keys_ok else '[ ERROR ]')
+    ), logfile)
+
+
+
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Generate the constands for a LowMC instance.')
+    parser.add_argument('-d', '--definition', type=str, nargs='?', default=None)
+    parser.add_argument('-a', '--auto', type=str, nargs='?', default=None)
+    parser.add_argument('-s', '--num_sboxes', type=int, nargs='?', default=1)
+    parser.add_argument('-k', '--key', type=str, nargs='?', default=1)
+    parser.add_argument('-v', '--verbose', action='count')
+    parser.add_argument('-z', '--ddiff_size', type=int, nargs='?', default=3)
+    parser.add_argument('--only_trail', action='store_true')
+    args = parser.parse_args()
+
+    if args.definition:
+        with open(args.definition, 'r') as config_stream:
+            try:
+                lowmc_instance = yaml.load(config_stream)
+            except yaml.YAMLError as exc:
+                print(exc)
+                exit()
+
+        lowmc_instance['settings']['num_sboxes'] = args.num_sboxes
+        lowmc_instance['settings']['key'] = args.key
+
+
+        lowmc = LowMC(lowmc_instance_description=lowmc_instance)
+        attack(lowmc, logfile, args.only_trail)
+
+    elif args.auto:
+        with open(args.auto, 'r') as config_stream:
+            try:
+                auto_def = yaml.load(config_stream)
+            except yaml.YAMLError as exc:
+                print(exc)
+                exit()
+        with open('log -- {}.csv'.format(time.strftime("%Y_%m_%d - %H_%M_%S", time.localtime())), 'w') as logfile:
+            log('{bs:s}, {ks:s}, {nr:s}, {dds:s}, {dd_f:s}, {dd_b:s}, '\
+                    '{t_find:s}, {t_enc:s}, {t_forward:s}, '\
+                    '{t_backward:s}, {t_collision:s}, {t_roundkeys:s}, '\
+                    '{num_collisions:s}, {num_trails_forward:s}, {num_trails_backward:s}, '\
+                    '{key_ok:s}'.format(
+                bs='blocksize', ks='keysize', nr='rounds', dds='d-diff size',
+                dd_f='# d-diffs foward',
+                dd_b='# d-diffs backward',
+                t_find='t find trail', t_enc='t encrypt',
+                t_forward='t forward', t_backward='t backward',
+                t_collision='t find collision', t_roundkeys='t calc roundkeys',
+                num_collisions='# collisions',
+                num_trails_forward='# trails forward',
+                num_trails_backward='# trails backward',
+                key_ok='test result'
+            ), logfile)
+            for definition in auto_def:
+                if 'setup' in definition:
+                    lowmc = LowMC(generator_settings=definition['setup'])
+                else:
+                    continue
+
+                for test in definition['tests']:
+                    if 'rounds' in test:
+                        lowmc.rounds = test['rounds']
+                    repeat = test.get('repeat', 1)
+                    key = test.get('key', 'random')
+                    gen = grain_ssg()
+                    for i in range(repeat):
+                        if key == 'random':
+                            k = [next(gen) for _ in range(lowmc.keysize)]
+                            print('random key {}'.format(k))
+                        elif type(key) is list:
+                            k = key[i]
+                        else:
+                            print('Key must be random or list')
+                            continue
+                        #print('setup new key')
+                        lowmc.set_key(k)
+
+                        attack(lowmc, logfile, args.only_trail)
+                        if args.only_trail:
+                            break
+                    if args.only_trail:
+                        break
+
+
+
+    else:
+        print('No instance definition given')
+        exit()

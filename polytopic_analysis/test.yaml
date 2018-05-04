@@ -1,0 +1,6 @@
+- setup: {b: 8, k: 8, r: 16}
+  tests:
+  - {k: random, r: 6, rp: 10}
+- setup: {b: 16, k: 16, r: 19}
+  tests:
+  - {k: random, r: 6, rp: 10}

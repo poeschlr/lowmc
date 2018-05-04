@@ -1,0 +1,92 @@
+- setup:
+      blocksize: 8
+      keysize: 8
+      rounds: 16
+  tests:
+    - rounds: 6
+      key: 'random'
+      repeat: 10
+    - rounds: 8
+      key: 'random'
+      repeat: 10
+    - rounds: 10
+      key: 'random'
+      repeat: 10
+    - rounds: 12
+      key: 'random'
+      repeat: 6
+    - rounds: 14
+      key: 'random'
+      repeat: 6
+    - rounds: 16
+      key: 'random'
+      repeat: 1
+- setup:
+      blocksize: 16
+      keysize: 16
+      rounds: 19
+  tests:
+    - rounds: 9
+      key: 'random'
+      repeat: 10
+    - rounds: 11
+      key: 'random'
+      repeat: 10
+    - rounds: 13
+      key: 'random'
+      repeat: 10
+    - rounds: 15
+      key: 'random'
+      repeat: 6
+    - rounds: 17
+      key: 'random'
+      repeat: 6
+    - rounds: 19
+      key: 'random'
+      repeat: 1
+- setup:
+      blocksize: 32
+      keysize: 32
+      rounds: 24
+  tests:
+    - rounds: 14
+      key: 'random'
+      repeat: 10
+    - rounds: 16
+      key: 'random'
+      repeat: 10
+    - rounds: 18
+      key: 'random'
+      repeat: 10
+    - rounds: 20
+      key: 'random'
+      repeat: 6
+    - rounds: 22
+      key: 'random'
+      repeat: 1
+    - rounds: 24
+      key: 'random'
+      repeat: 1
+- setup:
+      blocksize: 64
+      keysize: 64
+      rounds: 35
+  tests:
+    - rounds: 25
+      key: 'random'
+      repeat: 10
+    - rounds: 27
+      key: 'random'
+      repeat: 10
+    - rounds: 29
+      key: 'random'
+      repeat: 10
+    - rounds: 31
+      key: 'random'
+      repeat: 6
+    - rounds: 33
+      key: 'random'
+      repeat: 1
+    - rounds: 35
+      key: 'random'
+      repeat: 1
