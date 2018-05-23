@@ -15,9 +15,9 @@
     - rounds: 15
       key: 'random'
       repeat: 6
-    - rounds: 17
-      key: 'random'
-      repeat: 6
-    - rounds: 19
-      key: 'random'
-      repeat: 1
+    # - rounds: 17
+    #   key: 'random'
+    #   repeat: 6
+    # - rounds: 19
+    #   key: 'random'
+    #   repeat: 1

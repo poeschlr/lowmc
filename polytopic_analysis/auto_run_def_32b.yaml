@@ -2,6 +2,8 @@
       blocksize: 32
       keysize: 32
       rounds: 24
+      num_sboxes: 1
+      max_ddiff_size: 3
   tests:
     - rounds: 14
       key: 'random'

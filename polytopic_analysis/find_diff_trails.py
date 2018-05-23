@@ -17,6 +17,7 @@ import sys
 sys.path.append("../")
 from generate_matrices import instantiate_matrix, grain_ssg
 
+from utils import*
 from ddt import *
 from sage.all import *
 import argparse
@@ -29,22 +30,6 @@ SBox = mq.SBox(0x00, 0x01, 0x03, 0x06, 0x07, 0x04, 0x05, 0x02)
 invSBox = mq.SBox(0x00, 0x01, 0x07, 0x02, 0x05, 0x06, 0x03, 0x04)
 REFERENCE_PT = 0
 
-num_ddiffs_after_round = []
-num_ddiffs_before_round = []
-
-def log(logline, logfile):
-    print(logline)
-    logfile.write(logline+'\n')
-
-
-class NotEnoughDegreesOfFreedom(Exception):
-    def __init__(self, required_degrees, degrees):
-        self.required_degrees = required_degrees
-        self.degrees = degrees
-
-    def __str__(self):
-        return "Posibility space not enough degrees of freedom. Would need at least {:d} has {:d}".format(self.required_degrees, self.degrees)
-
 def init_diff_propagation(table):
     result = {}
     for i in range(len(table)):
@@ -54,45 +39,8 @@ def init_diff_propagation(table):
 
 verbosity_level = 0
 
-try:
-    basestring  # attempt to evaluate basestring
-    def isstr(s):
-        return isinstance(s, basestring)
-except NameError:
-    def isstr(s):
-        return isinstance(s, str)
-
-def to_gf2_vector(input, size):
-    if type(input) is int:
-        return vector(GF(2), [x for x in list('{0:0{width}b}'.format(input, width=size))])
-    elif isstr(input):
-        return to_gf2_vector(int(input, 0), size)
-    elif type(input) is list and len(input) == size:
-        return vector(GF(2), input)
-    else:
-        raise TypeError('can only convert int or correctly formated string to gf2 vector, got {} with type {}'.format(input, type(input)))
-
-def gf2_to_int(input):
-    p = len(input) - 1
-    r = 0
-    for x in input:
-        r += int(x)*2**p
-        p -= 1
-    return int(r)
-
-def print_list(lst, required_verbosity = 0):
-    if verbosity_level >= required_verbosity:
-        ml = 0
-        for l in lst:
-            s = str(l)
-            if len(s) > ml:
-                ml = len(s)
-            print(l, end='\n')
-        print('-'*ml, end='\n\n')
-
-def debug_output(msg, required_verbosity = 0, end='\n'):
-    if verbosity_level >= required_verbosity:
-        print(msg, end=end)
+num_ddiffs_after_round = []
+num_ddiffs_before_round = []
 
 class DDiff(object):
     HASH_SIZE = 2**32
@@ -243,8 +191,9 @@ class LowMC(object):
         self.blocksize = generator_settings.get('blocksize', 32)
         self.keysize = generator_settings.get('keysize', 32)
         self.num_sboxes = generator_settings.get('num_sboxes', 1)
+        self.max_ddiff_size = generator_settings.get('max_ddiff_size', 3)
         self.rounds = generator_settings.get('rounds', 24)
-        self.rounds_with_prop1 = ceil(self.blocksize/(self.num_sboxes*SBOX_SIZE))-1
+        self.rounds_with_prop1 = floor((self.blocksize-log(self.max_ddiff_size+1,2))/(self.num_sboxes*SBOX_SIZE))
 
         print("Generate random matrixes ", end="")
 
@@ -276,11 +225,12 @@ class LowMC(object):
         self.set_key(generator_settings.get('key', [next(gen) for _ in range(self.keysize)]))
 
     def from_description_file(self, lowmc_instance_description):
+        self.max_ddiff_size = lowmc_instance_description['settings'].get('max_ddiff_size', 3)
         self.blocksize = lowmc_instance_description['settings']['blocksize']
         self.keysize = lowmc_instance_description['settings']['keysize']
         self.num_sboxes = lowmc_instance_description['settings']['num_sboxes']
         self.rounds = lowmc_instance_description['settings']['rounds']
-        self.rounds_with_prop1 = ceil(self.blocksize/(self.num_sboxes*SBOX_SIZE))-1
+        self.rounds_with_prop1 = floor((self.blocksize-log(self.max_ddiff_size+1,2))/(self.num_sboxes*SBOX_SIZE))
         print("Create matrixes from yaml data ", end="")
         self.affine_matrixes = [matrix(GF(2), M) for M in lowmc_instance_description['linear_layers']]
         self.inv_affine_matrixes = [M**-1 for M in self.affine_matrixes]
@@ -446,6 +396,18 @@ class LowMC(object):
             return pt + self.reduced_round_keys[0]
         else:
             return pt
+    def propSpaceAfterInitRound(self):
+        num_sbox_bits = SBOX_SIZE*self.num_sboxes
+
+        zero_bits = [0]*num_sbox_bits
+
+        remaining_bits = self.blocksize - num_sbox_bits
+
+        prop_space = []
+        for i in range(1, remaining_bits**2-1):
+            prop_space.append([x for x in list('{0:0{width}b}'.format(i, width=remaining_bits))]+zero_bits)
+
+        return prop_space
 
     def getInputForGoodTrail(self):
         current_affine_trail = self.affine_matrixes[0]
@@ -465,12 +427,14 @@ class LowMC(object):
             new_equations = []
             for eq in current_affine_trail[-num_sbox_bits:].rows():
                 new_equations.append(eq[:-num_sbox_bits])
-
+            old_rank = 0
             if round < self.rounds_with_prop1-1:
                 sb_activation = matrix(GF(2), sb_activation.rows() + new_equations)
                 old_rank = rank(sb_activation)
             else:
+                print("here0 "+str(self.rounds_with_prop1) )
                 if round == self.rounds_with_prop1-1:
+                    print("here")
                     self.posibility_space.append(sb_activation.right_kernel())
                     #print(self.posibility_space[-1])
                     old_rank = rank(sb_activation)
@@ -494,6 +458,8 @@ class LowMC(object):
             for j in range(len(current_basis)):
                 resulting_basis.append(current_basis[j].list() + zero_bits)
             self.posibility_space[i] = resulting_basis
+        if self.rounds_with_prop1 == 1:
+            self.posibility_space.insert(0, self.propSpaceAfterInitRound())
         return self.posibility_space
 
 
@@ -731,7 +697,7 @@ def attack(lowmc, logfile, only_trail = False):
             else:
                 keys_found += 1
 
-    log('{bs:d}, {ks:d}, {nr:d}, {dds:d}, {dd_f:s}, {dd_b:s}, '\
+    write_log_ln('{bs:d}, {ks:d}, {nr:d}, {dds:d}, {dd_f:s}, {dd_b:s}, '\
             '{t_find:.3f}, {t_enc:.3f}, {t_forward:.3f}, '\
             '{t_backward:.3f}, {t_collision:.3f}, {t_roundkeys:.3f}, '\
             '{num_collisions:d}, {num_trails_forward:d}, {num_trails_backward:d}, '\
@@ -773,6 +739,7 @@ if __name__ == '__main__':
 
         lowmc_instance['settings']['num_sboxes'] = args.num_sboxes
         lowmc_instance['settings']['key'] = args.key
+        lowmc_instance['settings']['max_ddiff_size'] = args.ddiff_size
 
 
         lowmc = LowMC(lowmc_instance_description=lowmc_instance)
@@ -786,7 +753,8 @@ if __name__ == '__main__':
                 print(exc)
                 exit()
         with open('log -- {}.csv'.format(time.strftime("%Y_%m_%d - %H_%M_%S", time.localtime())), 'w') as logfile:
-            log('{bs:s}, {ks:s}, {nr:s}, {dds:s}, {dd_f:s}, {dd_b:s}, '\
+            write_log_ln('D-Diff size, {:d}'.format(args.ddiff_size), logfile)
+            write_log_ln('{bs:s}, {ks:s}, {nr:s}, {dds:s}, {dd_f:s}, {dd_b:s}, '\
                     '{t_find:s}, {t_enc:s}, {t_forward:s}, '\
                     '{t_backward:s}, {t_collision:s}, {t_roundkeys:s}, '\
                     '{num_collisions:s}, {num_trails_forward:s}, {num_trails_backward:s}, '\
