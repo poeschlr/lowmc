@@ -1,8 +1,9 @@
 - setup:
-      blocksize: 8
-      keysize: 8
+      blocksize: 32
+      keysize: 32
       rounds: 16
+      num_sboxes: 2
   tests:
-    - rounds: 16
+    - rounds: 8
       key: 'random'
       repeat: 1

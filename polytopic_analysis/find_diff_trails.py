@@ -88,7 +88,7 @@ def attack(lowmc, logfile, only_trail = False):
     #print(time.strftime("%H:%M:%S", time.localtime()))
     t_collision=time.time()
 
-    rb = lowmc.blocksize - 3
+    rb = lowmc.blocksize - lowmc.num_sboxes*3
     round_keys = []
     for i in range(lowmc.rounds + 1):
         round_keys.append([])
@@ -106,7 +106,7 @@ def attack(lowmc, logfile, only_trail = False):
             for a in t:
                 c += lowmc.round_constants[i]
                 c = lowmc.inv_affine_matrixes[i]*c
-                ck = vector(GF(2), [0]*rb + list((c + a)[-3:]))
+                ck = vector(GF(2), [0]*rb + list((c + a)[-lowmc.num_sboxes*3:]))
                 if ck not in round_keys[i+1]:
                     round_keys[i+1].append(ck)
                 c += ck
