@@ -3,6 +3,26 @@ from __future__ import division
 
 from sage.all import *
 
+verbosity_level = 0
+
+def print_list(lst, required_verbosity = 0):
+    if verbosity_level >= required_verbosity:
+        ml = 0
+        for l in lst:
+            s = str(l)
+            if len(s) > ml:
+                ml = len(s)
+            print(l, end='\n')
+        print('-'*ml, end='\n\n')
+
+def debug_output(msg, required_verbosity = 0, end='\n'):
+    if verbosity_level >= required_verbosity:
+        print(msg, end=end)
+
+def write_log_ln(logline, logfile):
+    print(logline)
+    logfile.write(logline+'\n')
+
 
 class NotEnoughDegreesOfFreedom(Exception):
     def __init__(self, required_degrees, degrees):
@@ -37,26 +57,3 @@ def gf2_to_int(input):
         r += int(x)*2**p
         p -= 1
     return int(r)
-
-class OutputHandler():
-    def __init__(self, verbosity_level, logfile):
-        self.verbosity_level = verbosity_level
-        self.logfile = logfile
-
-    def print_list(lst, required_verbosity = 0):
-        if self.verbosity_level >= required_verbosity:
-            ml = 0
-            for l in lst:
-                s = str(l)
-                if len(s) > ml:
-                    ml = len(s)
-                print(l, end='\n')
-            print('-'*ml, end='\n\n')
-
-    def debug_output(msg, required_verbosity = 0, end='\n'):
-        if self.verbosity_level >= required_verbosity:
-            print(msg, end=end)
-
-    def write_log_ln(logline):
-        print(logline)
-        self.logfile.write(logline+'\n')
